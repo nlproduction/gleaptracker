@@ -12,7 +12,7 @@ dotenv.config()
 const app = express()
 const PORT = Number(process.env.PORT) || 3000
 
-app.use(morgan("combined"))
+app.use(morgan(":date[iso] :method :url :status", { immediate: true }))
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "gleaptracker" })
