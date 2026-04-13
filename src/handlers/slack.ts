@@ -367,6 +367,17 @@ export function slackOptions(_req: Request, res: Response): void {
 
 export async function slackPost(req: Request, res: Response): Promise<void> {
   const rawBody = rawBodyToString(req.body);
+
+  let jsonBody: Record<string, unknown> | null = null;
+  try {
+    jsonBody = JSON.parse(rawBody);
+  } catch {}
+
+  if (jsonBody?.type === "url_verification") {
+    res.json({ challenge: jsonBody.challenge });
+    return;
+  }
+
   const signature = req.get("x-slack-signature") || "";
   const timestamp = req.get("x-slack-request-timestamp") || "";
 
@@ -375,16 +386,7 @@ export async function slackPost(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  let jsonBody: Record<string, unknown> | null = null;
-  try {
-    jsonBody = JSON.parse(rawBody);
-  } catch {}
-
   if (jsonBody) {
-    if (jsonBody.type === "url_verification") {
-      res.json({ challenge: jsonBody.challenge });
-      return;
-    }
 
     if (jsonBody.type === "event_callback") {
       const event = jsonBody.event as Record<string, unknown>;
