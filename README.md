@@ -1,36 +1,349 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GleapTracker
 
-## Getting Started
+An **Express** (Node.js) service that connects **Gleap** (customer support) with **Slack** and your issue tracker (**Linear** and/or **Jira**). When a support ticket needs dev attention, it flows through Slack for team review and automatically creates a tracked issue.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Workflow
+
+```
+Customer reports bug in Gleap
+         │
+         ▼
+Agent applies a template "Send to Slack" on Gleap
+The tamplate adds a message "..." and sets ticket status → ONSLACK.
+Special status "ONSLACK" allows agents seeing which tickets are "on pause"
+and also it prevents Gleap bot from automatically closing them.
+         │
+         ▼
+GleapTracker > Slack API: add message to #gleap-tickets channel on Slack.
+Developers and agents discuss it in a nested thread.
+At the bottom of the message there are 3 buttons:
+  ┌──────────────────────────────┐
+  │  `#12345`  *Ticket title*    │
+  │  Customer Name / email       │
+  │  [Confirm] [Reject] [Gleap↗] │
+  └──────────────────────────────┘
+         │
+         |
+Once devs get enough information, they click "Confirm" or "Reject" in the original message:
+         |
+    ┌────┴─────┐
+    ▼          ▼
+Confirm      Reject
+    │          │
+    │          └─ 1. A modal is shown on Slack, asking to enter
+    |             the reason of the rejection;
+    |             2. GleapTracker > Gleap API: Note with the reason added to Gleap ticket
+    |             4. GleapTracker > Gleap API: Ticket status set to INPROGRESS
+    |             5. Support agent resumes conversation with the customer
+    │
+    ▼
+A modal is shown on Slack, asking to enter a title of a new tracker ticket on Gleap,
+or pick up an existing tracker ticket from a drop-down
+         |
+    ┌────┴──────────────────────────────────────────────┐
+    ▼                                                   ▼
+New Tracker ticket                      Connect to existing Tracker ticket
+    |                                                   │
+    |                                                   ▼
+"Tracker ticket" created in Gleap,      Send request to Gleap API: connect
+with <GleapTackerBugId>, on the         current ticket to the selected tracker ticket ID
+FOR-RELEASE board                                       |
+    └───────────────┬───────────────────────────────────┘
+                    │
+                    ▼
+        Get <GlearTrackerTicketBugId>
+                    │
+                    ▼
+GleapTracker > Slack API: Add "⏳ Confirmed" label on the Slack thread initial message (so it's visible when you scroll messages on the channel)
+    │
+    ▼
+GleapTracker > Slack API: add message in the thread:
+"⏳ Confirmed, will be fixed soon. Open in Gleap: <TicketUrl>"
+- so suppot agents sees an update notification
+    │
+    ▼
+GleapTracker sends a request to Linear/Jira API - to ceate an issue:
+________________________________________________
+Title: [<GleapTackerBugId>] <GleapTicketTitle>
+Description: "Open in Gleap: <GleapTicketUl>"
+________________________________________________
+    │
+    ▼
+GleapTracker > Gleap API: for the customer's ticket, set status to "Waiting for update"
+This special ticket status helps prevent the bot from automatically closing those tickets when there's
+no reply from the customer for >7 days; also it helps putting aside tickets that at the moment don't need any attention.
+    │
+    ▼
+Once the bug is confirmed, developers create a bugfix/... branch and start working on it.
+Commit that fixes the issue can contain "Fixes: <ISSUE-ID>" in its commit message
+    |
+    ▼
+Devs git push commit to master, upload .zip to license server, push master to remote git
+    │
+    ▼
+Linear/Jira track commits with "Fixes ..." on the master branch.
+When they see it, the issue gets automatically closed
+    │
+    ▼
+Linear/Jira > GleapTracker Webhook (issue:updated)
+    │
+    ▼
+Linear/Jira issue title parsed to get <GlearTrackerTicketBugId>
+    │
+    ▼
+GleapTracker > Gleap API: get tracker ticket with <GlearTrackerTicketBugId>
+Tracker Ticket contains `string[]` array of IDs of linked tickets on Gleap
+    │
+    ▼
+GleapTracker > Gleap API: run a workflow for each of the linked tickets.
+The worklow sends a message to the customer (you can set yours on Gleap)
+Example:
+________________________________________________
+Thank you for your patience. We've fixed the bug
+and released a new version. Please update the
+plugin to the latest version.
+
+We’re closing the ticket. Feel free to reply to
+reopen it if the issue persists. If you have any
+other questions, please open a new ticket 🙂
+________________________________________________
+    │
+    ▼
+`GleapTracker > Gleap API`: update tracker ticket, set status=`DONE`
+    │
+    ▼
+When tracker ticket is closed, Gleap automatically closes all linked tickets.
+    │
+    ▼
+GleapTracker > Slack API: Add "✅ Closed" label on the Slack thread initial message (so it's visible when you scroll messages on the channel)
+    │
+    ▼
+GleapTracker > Slack API: Add "✅ Closed" message in the thread, so suppot agents see an update notification
+    │
+    ▼
+EXTRA: If customer replies back saying that the issue wasn't fixed for them
+Support agent changes ticket status to "In progress" on Gleap, and asks for more details
+If support agent is able to resolve on their own, they do it and change ticket status to "Done" again
+If support agent need dev help again: they manually change status to "On slack" -
+Gleap ticket already has Slack Thread ID and Slack Thread URL
+    │
+    ▼
+Gleap > GleapTracker webhook (ticket:updated)
+    │
+    ▼
+GleapTracker checks if the ticket has "On Slack" status and i Slack Thread ID is already set; if true, then:
+    │
+    ▼
+GleapTracker > Slack API: update initial thread message, change status from "✅ Closed" to "🔄 Reopened"
+GleapTracker > Slack API: add message to the thread: "🔄 Reopened" (so developer who worked on the ticket gets notified)
+    │
+    ▼
+When issue is resolved, support agent changes ticket status on Gleap to "Done"
+Status on Slack thread message changes to "✅ Closed" again
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Prerequisites
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Node.js 18+
+- pnpm
+- A [Gleap](https://gleap.io) account with API access
+- A [Slack App](https://api.slack.com/apps) with the scopes below
+- A [Linear](https://linear.app) workspace and/or [Jira](https://www.atlassian.com/software/jira) project
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Setup
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 1. Clone and install
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+git clone https://github.com/your-org/gleaptracker.git
+cd gleaptracker
+pnpm install
+```
 
-## Deploy on Vercel
+### 2. Configure secrets
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+cp .env.local.example .env.local
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Edit `.env.local` and fill in all values. See [.env.local.example](.env.local.example) for the full list.
+
+### 3. Configure the integration
+
+Edit `gleaptracker.ts` in the project root. This file controls all non-secret settings:
+
+| Field                     | Description                                                   |
+| ------------------------- | ------------------------------------------------------------- |
+| `gleap.workflowId`        | Gleap workflow ID run on linked tickets when issue is closed  |
+| `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)        |
+| `gleap.onSlackStatuses`   | Status values that trigger posting to Slack                   |
+| `gleap.waitingStatus`     | Status applied to linked tickets while fix is pending         |
+| `issueTracker`            | `"linear"` \| `"jira"` \| `"both"`                            |
+| `linear.teamId`           | Your Linear team ID                                           |
+| `linear.labelIds`         | Label IDs applied to created Linear issues                    |
+| `linear.stateId`          | Initial state ID for new Linear issues (e.g. "Todo")          |
+| `linear.trackerLabel`     | Label name identifying Gleap-linked issues in Linear webhooks |
+| `jira.host`               | Your Jira hostname, e.g. `yourteam.atlassian.net`             |
+| `jira.projectKey`         | Jira project key, e.g. `MAP`                                  |
+| `jira.issueType`          | Issue type name, e.g. `Bug`                                   |
+| `jira.doneStatusName`     | Jira status name that means "done", e.g. `Done`               |
+
+### 4. Run locally
+
+```bash
+pnpm dev
+```
+
+This starts Express on port **3000** (override with `PORT=3001 pnpm dev`). HTTP access logs use **morgan** (`combined` format).
+
+Use [ngrok](https://ngrok.com) to expose your local server for webhook testing:
+
+```bash
+ngrok http 3000
+```
+
+---
+
+## Slack App Setup
+
+Create a new app at [api.slack.com/apps](https://api.slack.com/apps).
+
+### Required Bot Token Scopes (OAuth & Permissions)
+
+| Scope                   | Purpose                                  |
+| ----------------------- | ---------------------------------------- |
+| `chat:write`            | Post messages                            |
+| `chat:write.customize`  | Custom username/icon (optional)          |
+| `channels:history`      | Read channel messages for g:note         |
+| `conversations:history` | Read thread replies                      |
+| `metadata.message:read` | Read message metadata (ticket ID lookup) |
+| `users:read`            | Resolve user display names               |
+
+### Interactivity & Shortcuts
+
+Enable **Interactivity** and set the Request URL to:
+
+```
+https://your-domain/api/slack
+```
+
+### Slash Commands
+
+Create two slash commands, both pointing to `https://your-domain/api/slack`:
+
+| Command                           | Description                           |
+| --------------------------------- | ------------------------------------- |
+| `/confirm [Title :: Description]` | Confirm a ticket from within a thread |
+| `/reject <reason>`                | Reject a ticket with a reason         |
+
+### Event Subscriptions
+
+Enable **Event Subscriptions**, set Request URL to `https://your-domain/api/slack`, then subscribe to bot event:
+
+- `message.channels`
+
+This enables the `g:note` feature — type `g:note your note text` in any ticket thread to add an internal note to the linked Gleap ticket.
+
+### Install the app
+
+After setting up scopes, install the app to your workspace. Copy the **Bot User OAuth Token** to `SLACK_BOT_TOKEN` and the **Signing Secret** to `SLACK_SIGNING_SECRET` in `.env.local`.
+
+---
+
+## Gleap Webhook Setup
+
+In Gleap: **Settings → Integrations → Webhooks → Add Webhook**
+
+- URL: `https://your-domain/api/webhooks/gleap`
+- Events: `ticket.created`, `ticket.updated`
+
+---
+
+## Linear Webhook Setup
+
+In Linear: **Settings → API → Webhooks → New Webhook**
+
+- URL: `https://your-domain/api/webhooks/linear`
+- Data change events: **Issue**
+- Copy the signing secret to `LINEAR_WEBHOOK_SECRET` in `.env.local`
+
+The webhook fires when an issue is marked Done. GleapTracker looks for issues with the `gleap-tracker-ticket` label (configurable in `gleaptracker.ts`) and a title matching `[bugId] Title`.
+
+---
+
+## Jira Webhook Setup
+
+In Jira: **Settings → System → WebHooks → Create a WebHook**
+
+- URL: `https://your-domain/api/webhooks/jira?secret=<your JIRA_WEBHOOK_SECRET>`
+- Events: **Issue → updated**
+
+The webhook fires on every issue update. GleapTracker filters for status transitions to your configured `doneStatusName` and issues with a title matching `[bugId] Title`.
+
+---
+
+## Project Structure
+
+```
+gleaptracker/
+├── gleaptracker.ts              # All non-secret configuration
+├── .env.local                   # Secrets (gitignored)
+├── .env.local.example
+├── src/
+│   ├── server.ts                # Express app entry (routes + morgan)
+│   ├── types/config.ts          # Types for gleaptracker.ts
+│   ├── handlers/                # Webhook / Slack HTTP handlers
+│   │   ├── gleapWebhook.ts
+│   │   ├── linearWebhook.ts
+│   │   ├── jiraWebhook.ts
+│   │   └── slack.ts
+│   └── integrations/
+│       ├── gleap/{client.ts,tracker.ts}
+│       ├── slack/client.ts
+│       ├── linear/client.ts
+│       └── jira/client.ts
+```
+
+HTTP routes (same paths as before, for easy migration):
+
+| Method | Path                            | Body                                   |
+| ------ | ------------------------------- | -------------------------------------- |
+| POST   | `/api/webhooks/gleap`           | JSON                                   |
+| POST   | `/api/webhooks/linear`          | raw JSON (signature)                   |
+| POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
+| POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |
+| GET    | `/health`                       | —                                      |
+
+---
+
+## Deployment
+
+Build and run the compiled server:
+
+```bash
+pnpm build
+pnpm start
+```
+
+`pnpm start` runs `node dist/src/server.js`. Set the same variables you use in `.env.local` as environment variables on the host (or ship a `.env.local` next to the app).
+
+**PM2 example:**
+
+```bash
+pnpm build
+PORT=3000 pm2 start dist/src/server.js --name gleaptracker
+```
+
+**Docker / VPS:** any Node 18+ host works; put a reverse proxy (nginx, Caddy) in front for HTTPS — webhooks require a public HTTPS URL.
+
+---
+
+## License
+
+MIT
