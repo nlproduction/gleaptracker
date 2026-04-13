@@ -171,6 +171,26 @@ class GleapMessagesResource {
       )
     }
   }
+
+  async sendMessage(ticketId: string, text: string): Promise<boolean> {
+    const res = await fetch(`${BASE_URL}/messages`, {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify({
+        ticket: ticketId,
+        type: "BOT",
+        isNote: false,
+        bot: true,
+        comment: { type: "paragraph", content: [{ type: "text", text }] },
+      }),
+    })
+    if (!res.ok) {
+      console.error(
+        `[Gleap] sendMessage on ticket ${ticketId} failed: ${res.status} ${await res.text()}`,
+      )
+    }
+    return res.ok
+  }
 }
 
 // ---------------------------------------------------------------------------

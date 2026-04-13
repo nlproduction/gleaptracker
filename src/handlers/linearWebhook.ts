@@ -88,12 +88,24 @@ const processIssueUpdate = async (data: Record<string, unknown>) => {
 
   const linkedTickets = (ticket.linkedTickets ?? []) as string[]
   if (linkedTickets.length) {
-    await Promise.all(
-      linkedTickets.map(async (id) => {
-        const ok = await gleap.tickets.runWorkflow(id, config.gleap.workflowId)
-        if (ok) console.log(`[Linear] Workflow applied to ticket ${id} ✓`)
-      }),
-    )
+    if (config.gleap.workflowId) {
+      await Promise.all(
+        linkedTickets.map(async (id) => {
+          const ok = await gleap.tickets.runWorkflow(id, config.gleap.workflowId!)
+          if (ok) console.log(`[Linear] Workflow applied to ticket ${id} ✓`)
+        }),
+      )
+    } else if (config.gleap.bugFixedMessage) {
+      const msg = config.gleap.bugFixedMessage
+      await Promise.all(
+        linkedTickets.map(async (id) => {
+          const ok = await gleap.messages.sendMessage(id, msg)
+          if (ok) console.log(`[Linear] Bug-fixed message sent to ticket ${id} ✓`)
+        }),
+      )
+    } else {
+      console.warn("[Linear] No workflowId or bugFixedMessage configured — skipping customer notification")
+    }
   }
 
   const ok = await gleap.tickets.update(ticket.id, { status: config.gleap.doneStatus })

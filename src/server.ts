@@ -36,3 +36,11 @@ app.post("/api/webhooks/jira", jsonBody, (req, res) => void jiraPost(req, res))
 app.listen(PORT, () => {
   console.log(`GleapTracker listening on http://localhost:${PORT}`)
 })
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason)
+})
+
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err)
+})

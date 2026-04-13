@@ -84,12 +84,24 @@ const processJiraIssueUpdate = async (payload: JiraIssueWebhookPayload) => {
 
   const linkedTickets = (ticket.linkedTickets ?? []) as string[]
   if (linkedTickets.length) {
-    await Promise.all(
-      linkedTickets.map(async (id) => {
-        const ok = await gleap.tickets.runWorkflow(id, config.gleap.workflowId)
-        if (ok) console.log(`[Jira] Workflow applied to Gleap ticket ${id} ✓`)
-      }),
-    )
+    if (config.gleap.workflowId) {
+      await Promise.all(
+        linkedTickets.map(async (id) => {
+          const ok = await gleap.tickets.runWorkflow(id, config.gleap.workflowId!)
+          if (ok) console.log(`[Jira] Workflow applied to Gleap ticket ${id} ✓`)
+        }),
+      )
+    } else if (config.gleap.bugFixedMessage) {
+      const msg = config.gleap.bugFixedMessage
+      await Promise.all(
+        linkedTickets.map(async (id) => {
+          const ok = await gleap.messages.sendMessage(id, msg)
+          if (ok) console.log(`[Jira] Bug-fixed message sent to Gleap ticket ${id} ✓`)
+        }),
+      )
+    } else {
+      console.warn("[Jira] No workflowId or bugFixedMessage configured — skipping customer notification")
+    }
   }
 
   const ok = await gleap.tickets.update(ticket.id, { status: config.gleap.doneStatus })

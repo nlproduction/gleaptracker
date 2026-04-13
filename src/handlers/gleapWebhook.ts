@@ -287,9 +287,16 @@ export async function gleapPost(req: Request, res: Response): Promise<void> {
   }
 
   const { event, data: ticket } = payload
-  console.log(`[Gleap webhook] ${event} — ticket ${ticket.id} (bugId: ${ticket.bugId})`)
 
   try {
+    console.log(`[Gleap webhook] ${event} — ticket ${ticket?.id} (bugId: ${ticket?.bugId})`)
+
+    if (!ticket) {
+      console.error("[Gleap webhook] Payload missing 'data' field — skipping")
+      res.status(200).set(corsHeaders).end()
+      return
+    }
+
     if (event === "ticket.created") {
       await processTrackerTicket(ticket)
     } else if (event === "ticket.updated") {

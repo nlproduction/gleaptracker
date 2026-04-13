@@ -6,7 +6,7 @@
  *
  * Fields that reference process.env must be set in .env.local.
  */
-import type { GleapTrackerConfig } from "./src/types/config"
+import type { GleapTrackerConfig } from "./src/types/config";
 
 const config: GleapTrackerConfig = {
   // -------------------------------------------------------------------------
@@ -14,8 +14,6 @@ const config: GleapTrackerConfig = {
   // -------------------------------------------------------------------------
   gleap: {
     projectId: process.env.GLEAP_PROJECT_ID!,
-    /** Workflow run on linked tickets when the tracker issue is marked Done */
-    workflowId: "your-gleap-workflow-id",
     /** Ticket type for "for release" tracker tickets */
     trackerTicketType: "FOR-RELEASE",
     /** Status values that trigger sending the ticket to the Slack channel */
@@ -26,6 +24,17 @@ const config: GleapTrackerConfig = {
     waitingStatus: "WAITINGFORUPDATE",
     /** Type applied to tickets when they are rejected by the dev team */
     inProgressType: "INPROGRESS",
+
+    /** Optional: Workflow run on linked tickets when the tracker issue is marked Done */
+    // workflowId: "your-gleap-workflow-id",
+
+    /**
+     * Optional: Message to the customers who were waiting for the bugfix
+     * It's recommended to use either the bugFixedMessage or a workflowId
+     */
+    bugFixedMessage: `Thank you for your patience. We've fixed the bug and released a new version. Please update the plugin.
+
+We're closing the ticket. Feel free to reply to reopen it if the issue persists. If you have any other questions, please open a new ticket 🙂`,
   },
 
   // -------------------------------------------------------------------------
@@ -65,6 +74,6 @@ const config: GleapTrackerConfig = {
     doneStatusName: "Done",
     webhookSecret: process.env.JIRA_WEBHOOK_SECRET!,
   },
-}
+};
 
-export default config
+export default config;

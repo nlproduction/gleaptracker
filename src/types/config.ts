@@ -1,56 +1,58 @@
 export interface GleapConfig {
   /** Your Gleap project ID (from Gleap dashboard URL) */
-  projectId: string
+  projectId: string;
   /** Gleap workflow ID to run on linked tickets when issue is marked done */
-  workflowId: string
+  workflowId?: string;
   /** Ticket type used for tracker/release tickets */
-  trackerTicketType: string
+  trackerTicketType: string;
   /** Gleap status IDs/names that mean "needs Slack discussion" */
-  onSlackStatuses: string[]
+  onSlackStatuses: string[];
   /** Status value for closed/done tickets */
-  doneStatus: string
+  doneStatus: string;
   /** Status value for "waiting for update" (applied to linked tickets) */
-  waitingStatus: string
+  waitingStatus: string;
   /** Type applied to rejected tickets */
-  inProgressType: string
+  inProgressType: string;
+  /** Message to the customers who were waiting for the bugfix */
+  bugFixedMessage?: string;
 }
 
 export interface SlackConfig {
   /** Slack channel ID where ticket threads are created */
-  channelId: string
+  channelId: string;
 }
 
 export interface LinearConfig {
   /** Linear team ID */
-  teamId: string
+  teamId: string;
   /** Label IDs to apply to created Linear issues */
-  labelIds: string[]
+  labelIds: string[];
   /** Workflow state ID for new issues (e.g. "Todo" / unstarted) */
-  stateId: string
+  stateId: string;
   /** Label name used to identify Gleap-linked issues in Linear webhooks */
-  trackerLabel: string
+  trackerLabel: string;
   /** Linear webhook signing secret */
-  webhookSecret: string
+  webhookSecret: string;
 }
 
 export interface JiraConfig {
   /** Jira host, e.g. "yourteam.atlassian.net" */
-  host: string
+  host: string;
   /** Jira project key, e.g. "MAP" */
-  projectKey: string
+  projectKey: string;
   /** Issue type name, e.g. "Bug" or "Task" */
-  issueType: string
+  issueType: string;
   /** Status name that means the issue is done, e.g. "Done" */
-  doneStatusName: string
+  doneStatusName: string;
   /** Secret used to verify incoming Jira webhooks */
-  webhookSecret: string
+  webhookSecret: string;
 }
 
 export interface GleapTrackerConfig {
-  gleap: GleapConfig
-  slack: SlackConfig
+  gleap: GleapConfig;
+  slack: SlackConfig;
   /** Which issue tracker(s) to use */
-  issueTracker: "linear" | "jira" | "both"
-  linear?: LinearConfig
-  jira?: JiraConfig
+  issueTracker: "linear" | "jira" | "both";
+  linear?: LinearConfig;
+  jira?: JiraConfig;
 }
