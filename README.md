@@ -11,7 +11,7 @@ Customer reports bug in Gleap
          │
          ▼
 Agent applies a template "Send to Slack" on Gleap
-The tamplate adds a message "..." and sets ticket status → ONSLACK.
+The template adds a message "..." and sets ticket status → ONSLACK.
 Special status "ONSLACK" allows agents seeing which tickets are "on pause"
 and also it prevents Gleap bot from automatically closing them.
          │
@@ -37,6 +37,8 @@ Confirm      Reject
     |             2. GleapTracker > Gleap API: Note with the reason added to Gleap ticket
     |             4. GleapTracker > Gleap API: Ticket status set to INPROGRESS
     |             5. Support agent resumes conversation with the customer
+    |             6. GleapTracker > Slack API: Add "❌ Rejected" status to initial thread message
+    |             7. GleapTracker > Slack API: add comment to the thread: "❌ Rejected: <Reason>"
     │
     ▼
 A modal is shown on Slack, asking to enter a title of a new tracker ticket on Gleap,
@@ -56,7 +58,8 @@ FOR-RELEASE board                                       |
         Get <GlearTrackerTicketBugId>
                     │
                     ▼
-GleapTracker > Slack API: Add "⏳ Confirmed" label on the Slack thread initial message (so it's visible when you scroll messages on the channel)
+GleapTracker > Slack API: Add "⏳ Confirmed" label on the Slack thread initial message
+(so it's visible when you scroll messages on the channel)
     │
     ▼
 GleapTracker > Slack API: add message in the thread:
@@ -72,8 +75,9 @@ ________________________________________________
     │
     ▼
 GleapTracker > Gleap API: for the customer's ticket, set status to "Waiting for update"
-This special ticket status helps prevent the bot from automatically closing those tickets when there's
-no reply from the customer for >7 days; also it helps putting aside tickets that at the moment don't need any attention.
+This special ticket status helps prevent the bot from automatically closing those tickets
+when there's no reply from the customer for >7 days; also it helps putting aside tickets
+that at the moment don't need any attention.
     │
     ▼
 Once the bug is confirmed, developers create a bugfix/... branch and start working on it.
@@ -117,15 +121,17 @@ ________________________________________________
 When tracker ticket is closed, Gleap automatically closes all linked tickets.
     │
     ▼
-GleapTracker > Slack API: Add "✅ Closed" label on the Slack thread initial message (so it's visible when you scroll messages on the channel)
+GleapTracker > Slack API: Add "✅ Closed" label on the Slack thread initial message
+(so it's visible when you scroll messages on the channel)
     │
     ▼
-GleapTracker > Slack API: Add "✅ Closed" message in the thread, so suppot agents see an update notification
+GleapTracker > Slack API: Add "✅ Closed" message in the thread,
+so suppot agents see an update notification
     │
     ▼
 EXTRA: If customer replies back saying that the issue wasn't fixed for them
 Support agent changes ticket status to "In progress" on Gleap, and asks for more details
-If support agent is able to resolve on their own, they do it and change ticket status to "Done" again
+If support agent is able to resolve on their own, they do it and change ticket status to "Done".
 If support agent need dev help again: they manually change status to "On slack" -
 Gleap ticket already has Slack Thread ID and Slack Thread URL
     │
@@ -133,11 +139,14 @@ Gleap ticket already has Slack Thread ID and Slack Thread URL
 Gleap > GleapTracker webhook (ticket:updated)
     │
     ▼
-GleapTracker checks if the ticket has "On Slack" status and i Slack Thread ID is already set; if true, then:
+GleapTracker checks if the ticket has "On Slack" status
+and if Slack Thread ID is already set; if true, then:
     │
     ▼
-GleapTracker > Slack API: update initial thread message, change status from "✅ Closed" to "🔄 Reopened"
-GleapTracker > Slack API: add message to the thread: "🔄 Reopened" (so developer who worked on the ticket gets notified)
+GleapTracker > Slack API: update initial thread message,
+change status from "✅ Closed" to "🔄 Reopened"
+GleapTracker > Slack API: add message to the thread: "🔄 Reopened"
+(so developer who worked on the ticket gets notified)
     │
     ▼
 When issue is resolved, support agent changes ticket status on Gleap to "Done"
