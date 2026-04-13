@@ -5,9 +5,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/src/server.js",
+    "start": "DOTENV_CONFIG_PATH=.env.local node -r dotenv/config dist/src/server.js",
     "lint": "tsc --noEmit",
-    "start:pm2": "pm2 start dist/src/server.js --name gleaptracker",
+    "start:pm2": "pm2 start dist/src/server.js --name gleaptracker --node-args='-r dotenv/config' --env DOTENV_CONFIG_PATH=.env.local",
     "stop:pm2": "pm2 stop gleaptracker",
     "reload:pm2": "pm2 reload gleaptracker --update-env",
     "delete:pm2": "pm2 delete gleaptracker",
