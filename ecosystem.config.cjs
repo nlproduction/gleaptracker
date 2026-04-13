@@ -3,12 +3,12 @@ module.exports = {
     {
       name: "gleaptracker",
       script: "dist/src/server.js",
-      cwd: "/var/www/gleaptracker",
+      cwd: ".",
       node_args: "-r dotenv/config",
       env: {
-        DOTENV_CONFIG_PATH: "/var/www/gleaptracker/.env.local",
+        DOTENV_CONFIG_PATH: ".env.local",
         PORT: "3005",
       },
     },
   ],
-}
+};
