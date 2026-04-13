@@ -6,7 +6,14 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/src/server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "start:pm2": "pm2 start dist/src/server.js --name gleaptracker",
+    "stop:pm2": "pm2 stop gleaptracker",
+    "reload:pm2": "pm2 reload gleaptracker --update-env",
+    "delete:pm2": "pm2 delete gleaptracker",
+    "logs:pm2": "pm2 logs gleaptracker",
+    "restart:pm2": "pm2 restart gleaptracker",
+    "status:pm2": "pm2 status gleaptracker"
   },
   "dependencies": {
     "@linear/sdk": "^81.0.0",
