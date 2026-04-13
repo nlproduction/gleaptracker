@@ -16,14 +16,14 @@ const config: GleapTrackerConfig = {
     projectId: process.env.GLEAP_PROJECT_ID!,
     /** Ticket type for "for release" tracker tickets */
     trackerTicketType: "FOR-RELEASE",
-    /** Status values that trigger sending the ticket to the Slack channel */
-    onSlackStatuses: ["ONSLACK"],
-    /** Status value Gleap uses for closed/done tickets */
-    doneStatus: "DONE",
-    /** Status value applied to linked customer tickets while fix is pending */
-    waitingStatus: "WAITINGFORUPDATE",
     /** Type applied to tickets when they are rejected by the dev team */
     inProgressType: "INPROGRESS",
+    /** Status value Gleap uses for closed/done tickets */
+    doneStatus: "DONE",
+    /** CUSTOM status value that trigger sending the ticket to the Slack channel */
+    onSlackStatuses: ["cz2qz"],
+    /** CUSTOM status values applied to linked customer tickets while fix is pending */
+    waitingStatus: "9oyq7h",
 
     /** Optional: Workflow run on linked tickets when the tracker issue is marked Done */
     // workflowId: "your-gleap-workflow-id",

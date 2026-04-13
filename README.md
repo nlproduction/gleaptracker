@@ -203,6 +203,24 @@ Edit `gleaptracker.ts` in the project root. This file controls all non-secret se
 | `jira.issueType`          | Issue type name, e.g. `Bug`                                   |
 | `jira.doneStatusName`     | Jira status name that means "done", e.g. `Done`               |
 
+#### Finding Gleap status IDs
+
+Several fields in `gleaptracker.ts` require internal Gleap status IDs (e.g. `"cz2qz"`) rather than the human-readable names shown in the UI (`"On Slack"`). To find them:
+
+1. Open your Gleap project → **Bugs**
+2. Open the browser DevTools → **Network** tab
+3. Reload the page or click on a status to edit it
+4. Find the API request to `appapi.gleap.io/v3/tickets?type=...` the "type" contains the string you need
+5. Alternatively: open any ticket in Gleap and change its status while watching the Network tab — the PATCH/PUT request body will contain the raw status ID
+
+Fields that need these IDs:
+
+| Field                   | What it maps to in Gleap                          |
+| ----------------------- | ------------------------------------------------- |
+| `gleap.onSlackStatuses` | Your custom "Send to Slack" / "On Slack" status   |
+| `gleap.waitingStatus`   | Your "Waiting for Update" status                  |
+| `gleap.doneStatus`      | Your "Done / Closed" status (often just `"DONE"`) |
+
 ### 4. Run locally
 
 ```bash
