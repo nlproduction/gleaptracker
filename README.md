@@ -351,14 +351,86 @@ pnpm start
 
 `pnpm start` runs `node dist/src/server.js`. Set the same variables you use in `.env.local` as environment variables on the host (or ship a `.env.local` next to the app).
 
-**PM2 example:**
+**PM2**
+
+[PM2](https://pm2.keymetrics.io) is a process manager for Node.js. It keeps your app running after you log out of the server, automatically restarts it if it crashes, and survives server reboots (via `pm2 startup`).
+
+Install globally on the server:
+
+```bash
+pnpm add -g pm2
+```
+
+The repo includes `ecosystem.config.cjs` which tells PM2 how to start the app:
+
+- **`node_args: "-r dotenv/config"`** — preloads dotenv before any module is imported, so `.env.local` is read before `gleaptracker.ts` evaluates `process.env.*`
+- **`DOTENV_CONFIG_PATH`** — points dotenv to `.env.local` instead of the default `.env`
+- **`PORT`** — the port Express listens on (must match your Apache `ProxyPass` port)
+
+Build and start with PM2:
 
 ```bash
 pnpm build
-PORT=3000 pm2 start dist/src/server.js --name gleaptracker
+pnpm start:pm2  # runs: pm2 start ecosystem.config.cjs
 ```
 
-**Docker / VPS:** any Node 18+ host works; put a reverse proxy (nginx, Caddy) in front for HTTPS — webhooks require a public HTTPS URL.
+Useful PM2 commands (also available as `pnpm` scripts):
+
+```bash
+pnpm logs:pm2     # tail live logs
+pnpm reload:pm2  # restart after code change
+pnpm status:pm2   # show process status
+pnpm stop:pm2     # stop without removing
+pnpm delete:pm2   # remove from PM2 process list
+```
+
+Make PM2 survive reboots:
+
+```bash
+pm2 save          # save current process list
+pm2 startup       # print and run the systemd command
+```
+
+**Docker / VPS:** any Node 18+ host works; put a reverse proxy (Apache, nginx, Caddy) in front for HTTPS — webhooks require a public HTTPS URL.
+
+### Apache reverse proxy setup
+
+Enable the required modules:
+
+```bash
+sudo a2enmod proxy proxy_http rewrite
+sudo systemctl reload apache2
+```
+
+Create a virtual host config, e.g. `/etc/apache2/sites-available/gleaptracker.example.com.conf`:
+
+```apache
+<VirtualHost *:80>
+    ServerName gleaptracker.example.com
+
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:3005/
+    ProxyPassReverse / http://localhost:3005/
+
+    ErrorLog ${APACHE_LOG_DIR}/gleaptracker.error.log
+    CustomLog ${APACHE_LOG_DIR}/gleaptracker.access.log combined
+</VirtualHost>
+```
+
+Enable the site and reload:
+
+```bash
+sudo a2ensite gleaptracker.example.com.conf
+sudo systemctl reload apache2
+```
+
+Add HTTPS with Certbot:
+
+```bash
+sudo certbot --apache -d gleaptracker.example.com
+```
+
+Certbot will automatically add the HTTPS virtual host and redirect HTTP → HTTPS.
 
 ---
 
