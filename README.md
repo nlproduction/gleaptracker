@@ -341,40 +341,6 @@ The webhook fires on every issue update. GleapTracker filters for status transit
 
 ---
 
-## Project Structure
-
-```
-gleaptracker/
-├── gleaptracker.ts              # All non-secret configuration
-├── .env.local                   # Secrets (gitignored)
-├── .env.local.example
-├── src/
-│   ├── server.ts                # Express app entry (routes + morgan)
-│   ├── types/config.ts          # Types for gleaptracker.ts
-│   ├── handlers/                # Webhook / Slack HTTP handlers
-│   │   ├── gleapWebhook.ts
-│   │   ├── linearWebhook.ts
-│   │   ├── jiraWebhook.ts
-│   │   └── slack.ts
-│   └── integrations/
-│       ├── gleap/{client.ts,tracker.ts}
-│       ├── slack/client.ts
-│       ├── linear/client.ts
-│       └── jira/client.ts
-```
-
-HTTP routes (same paths as before, for easy migration):
-
-| Method | Path                            | Body                                   |
-| ------ | ------------------------------- | -------------------------------------- |
-| POST   | `/api/webhooks/gleap`           | JSON                                   |
-| POST   | `/api/webhooks/linear`          | raw JSON (signature)                   |
-| POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
-| POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |
-| GET    | `/health`                       | —                                      |
-
----
-
 ## Run locally
 
 ```bash
@@ -482,6 +448,40 @@ sudo certbot --apache -d gleaptracker.example.com
 ```
 
 Certbot will automatically add the HTTPS virtual host and redirect HTTP → HTTPS.
+
+---
+
+## Project Structure
+
+```
+gleaptracker/
+├── gleaptracker.ts              # All non-secret configuration
+├── .env.local                   # Secrets (gitignored)
+├── .env.local.example
+├── src/
+│   ├── server.ts                # Express app entry (routes + morgan)
+│   ├── types/config.ts          # Types for gleaptracker.ts
+│   ├── handlers/                # Webhook / Slack HTTP handlers
+│   │   ├── gleapWebhook.ts
+│   │   ├── linearWebhook.ts
+│   │   ├── jiraWebhook.ts
+│   │   └── slack.ts
+│   └── integrations/
+│       ├── gleap/{client.ts,tracker.ts}
+│       ├── slack/client.ts
+│       ├── linear/client.ts
+│       └── jira/client.ts
+```
+
+HTTP routes (same paths as before, for easy migration):
+
+| Method | Path                            | Body                                   |
+| ------ | ------------------------------- | -------------------------------------- |
+| POST   | `/api/webhooks/gleap`           | JSON                                   |
+| POST   | `/api/webhooks/linear`          | raw JSON (signature)                   |
+| POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
+| POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |
+| GET    | `/health`                       | —                                      |
 
 ---
 
