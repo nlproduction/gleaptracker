@@ -396,7 +396,7 @@ Useful PM2 commands (also available as `pnpm` scripts):
 
 ```bash
 pnpm logs:pm2     # tail live logs
-pnpm reload:pm2  # restart after code change
+pnpm reload:pm2   # restart after code change
 pnpm status:pm2   # show process status
 pnpm stop:pm2     # stop without removing
 pnpm delete:pm2   # remove from PM2 process list
