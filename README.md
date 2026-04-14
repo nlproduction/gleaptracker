@@ -461,7 +461,7 @@ gleaptracker/
 ├── .env.local.example
 ├── src/
 │   ├── server.ts                # Express app entry (routes + morgan)
-│   ├── types/config.ts          # Types for gleaptracker.ts
+│   ├── types/config.ts          # Types for gleaptracker.config.ts
 │   ├── handlers/                # Webhook / Slack HTTP handlers
 │   │   ├── gleapWebhook.ts
 │   │   ├── linearWebhook.ts
