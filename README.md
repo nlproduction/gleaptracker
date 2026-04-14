@@ -260,15 +260,6 @@ Enable **Interactivity** and set the Request URL to:
 https://your-domain/api/slack
 ```
 
-### Slash Commands
-
-Create two slash commands, both pointing to `https://your-domain/api/slack`:
-
-| Command                           | Description                           |
-| --------------------------------- | ------------------------------------- |
-| `/confirm [Title :: Description]` | Confirm a ticket from within a thread |
-| `/reject <reason>`                | Reject a ticket with a reason         |
-
 ### Event Subscriptions
 
 Enable **Event Subscriptions**, set Request URL to `https://your-domain/api/slack`, then subscribe to bot event:

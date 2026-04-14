@@ -340,14 +340,6 @@ const openRejectModal = async (
     console.error(`[Slack] views.open (reject) failed: ${res.error}`);
 };
 
-const parseConfirmText = (text: string) => {
-  if (!text.trim()) return { title: undefined, description: undefined };
-  const [rawTitle, ...rest] = text.split("::");
-  return {
-    title: rawTitle?.trim() || undefined,
-    description: rest.join("::").trim() || undefined,
-  };
-};
 
 function rawBodyToString(body: unknown): string {
   if (Buffer.isBuffer(body)) return body.toString("utf8");
@@ -419,65 +411,6 @@ export async function slackPost(req: Request, res: Response): Promise<void> {
   const params = new URLSearchParams(rawBody);
 
   try {
-    const command = params.get("command");
-    if (command === "/confirm" || command === "/reject") {
-      const threadTs = params.get("thread_ts");
-      const channelId = params.get("channel_id") || SLACK_CHANNEL_ID;
-      const userId = params.get("user_id") || "";
-      const text = params.get("text") || "";
-
-      if (!threadTs) {
-        res
-          .status(200)
-          .json({
-            response_type: "ephemeral",
-            text: `Use \`${command}\` inside a ticket thread.`,
-          });
-        return;
-      }
-
-      const gleapTicketId = await getGleapTicketIdFromThread(
-        channelId,
-        threadTs,
-      );
-      if (!gleapTicketId) {
-        res
-          .status(200)
-          .json({
-            response_type: "ephemeral",
-            text: "Could not find a Gleap ticket linked to this thread.",
-          });
-        return;
-      }
-
-      const ctx: SlackActionContext = { channelId, threadTs, userId };
-
-      if (command === "/confirm") {
-        const { title, description } = parseConfirmText(text);
-        void handleConfirm(
-          gleapTicketId,
-          { customTitle: title, description },
-          ctx,
-        );
-      } else {
-        if (!text.trim()) {
-          res
-            .status(200)
-            .json({
-              response_type: "ephemeral",
-              text: "Usage: `/reject <reason>`",
-            });
-          return;
-        }
-        void handleReject(gleapTicketId, text, ctx);
-      }
-
-      res
-        .status(200)
-        .json({ response_type: "ephemeral", text: "Processing..." });
-      return;
-    }
-
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(params.get("payload") || "{}");

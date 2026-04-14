@@ -20,6 +20,8 @@ const config: GleapTrackerConfig = {
     inProgressType: "INPROGRESS",
     /** Status value Gleap uses for closed/done tickets */
     doneStatus: "DONE",
+
+    /** SEE README.md on how to get custom status IDs from Gleap */
     /** CUSTOM status value that trigger sending the ticket to the Slack channel */
     onSlackStatuses: ["cz2qz"],
     /** CUSTOM status values applied to linked customer tickets while fix is pending */
