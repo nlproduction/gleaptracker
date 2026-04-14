@@ -157,7 +157,7 @@ When issue is resolved, support agent changes ticket status on Gleap to "Done"
 Status on Slack thread message changes to "✅ Closed" again
 ```
 
-## Adding internal notes to Gleap ticket from Slack thread
+### Adding internal notes to Gleap ticket from Slack thread
 
 Inside any ticket thread on Slack, team members can post an internal note directly to the linked Gleap ticket by including `g:note` anywhere in their message:
 
