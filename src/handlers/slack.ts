@@ -340,7 +340,6 @@ const openRejectModal = async (
     console.error(`[Slack] views.open (reject) failed: ${res.error}`);
 };
 
-
 function rawBodyToString(body: unknown): string {
   if (Buffer.isBuffer(body)) return body.toString("utf8");
   if (typeof body === "string") return body;
@@ -379,7 +378,6 @@ export async function slackPost(req: Request, res: Response): Promise<void> {
   }
 
   if (jsonBody) {
-
     if (jsonBody.type === "event_callback") {
       const event = jsonBody.event as Record<string, unknown>;
       if (
@@ -440,6 +438,7 @@ export async function slackPost(req: Request, res: Response): Promise<void> {
           gleap.tickets.list({
             type: config.gleap.trackerTicketType,
             trackerTicket: true,
+            status: "OPEN",
           }),
         ]);
         await openConfirmModal(
