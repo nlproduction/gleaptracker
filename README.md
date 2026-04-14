@@ -6,6 +6,8 @@ An **Express** (Node.js) service that connects **Gleap** (customer support) with
 
 ## Workflow
 
+Click to watch the demo on YouTube:
+
 [![Watch the demo](https://img.youtube.com/vi/Vpwf07QsIrI/maxresdefault.jpg)](https://youtu.be/Vpwf07QsIrI)
 
 ```
