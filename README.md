@@ -484,7 +484,7 @@ gleaptracker/
 | POST   | `/api/webhooks/linear`          | raw JSON (signature)                   |
 | POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
 | POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |
-| GET    | `/health`                       | JSON                                   |
+| GET    | `/health`                       | -                                      |
 
 ---
 
