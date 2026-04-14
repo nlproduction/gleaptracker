@@ -455,7 +455,7 @@ Certbot will automatically add the HTTPS virtual host and redirect HTTP → HTTP
 
 ```
 gleaptracker/
-├── gleaptracker.ts              # All non-secret configuration
+├── gleaptracker.config.ts       # All non-secret configuration
 ├── .env.local                   # Secrets (gitignored)
 ├── .env.local.example
 ├── src/
