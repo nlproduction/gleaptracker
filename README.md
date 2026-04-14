@@ -184,7 +184,7 @@ GleapTracker strips the `g:note` tag and adds the rest of the message as an inte
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-org/gleaptracker.git
+git clone https://github.com/nlproduction/gleaptracker.git
 cd gleaptracker
 pnpm install
 ```
