@@ -201,21 +201,22 @@ Edit `.env.local` and fill in all values. See [.env.local.example](.env.local.ex
 
 Edit `gleaptracker.ts` in the project root. This file controls all non-secret settings:
 
-| Field                     | Description                                                   |
-| ------------------------- | ------------------------------------------------------------- |
-| `gleap.workflowId`        | Gleap workflow ID run on linked tickets when issue is closed  |
-| `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)        |
-| `gleap.onSlackStatus`     | Status value that triggers posting to Slack                   |
-| `gleap.waitingStatus`     | Status applied to linked tickets while fix is pending         |
-| `issueTracker`            | `"linear"` \| `"jira"` \| `"both"`                            |
-| `linear.teamId`           | Your Linear team ID                                           |
-| `linear.labelIds`         | Label IDs applied to created Linear issues                    |
-| `linear.stateId`          | Initial state ID for new Linear issues (e.g. "Todo")          |
-| `linear.trackerLabel`     | Label name identifying Gleap-linked issues in Linear webhooks |
-| `jira.host`               | Your Jira hostname, e.g. `yourteam.atlassian.net`             |
-| `jira.projectKey`         | Jira project key, e.g. `MAP`                                  |
-| `jira.issueType`          | Issue type name, e.g. `Bug`                                   |
-| `jira.doneStatusName`     | Jira status name that means "done", e.g. `Done`               |
+| Field                     | Description                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `gleap.workflowId`        | _(optional)_ Gleap workflow ID run on each linked ticket when the issue is closed — use this **or** `bugFixedMessage`, not both      |
+| `gleap.bugFixedMessage`   | _(optional)_ Plain-text message sent directly to each linked ticket when the issue is closed — fallback when `workflowId` is not set |
+| `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)                                                                               |
+| `gleap.onSlackStatus`     | Status value that triggers posting to Slack                                                                                          |
+| `gleap.waitingStatus`     | Status applied to linked tickets while fix is pending                                                                                |
+| `issueTracker`            | `"linear"` \| `"jira"` \| `"both"`                                                                                                   |
+| `linear.teamId`           | Your Linear team ID                                                                                                                  |
+| `linear.labelIds`         | Label IDs applied to created Linear issues                                                                                           |
+| `linear.stateId`          | Initial state ID for new Linear issues (e.g. "Todo")                                                                                 |
+| `linear.trackerLabel`     | Label name identifying Gleap-linked issues in Linear webhooks                                                                        |
+| `jira.host`               | Your Jira hostname, e.g. `yourteam.atlassian.net`                                                                                    |
+| `jira.projectKey`         | Jira project key, e.g. `MAP`                                                                                                         |
+| `jira.issueType`          | Issue type name, e.g. `Bug`                                                                                                          |
+| `jira.doneStatusName`     | Jira status name that means "done", e.g. `Done`                                                                                      |
 
 #### Finding Gleap status IDs
 
@@ -241,7 +242,7 @@ Before the integration can work, a few things need to be configured in Gleap its
 
 #### Custom ticket statuses
 
-Go to **Gleap → Settings → Ticket statuses** and create two custom statuses:
+Go to **Gleap → Bugs → Settings** and create two custom statuses:
 
 | Purpose                                     | Suggested name                  | Used in config        |
 | ------------------------------------------- | ------------------------------- | --------------------- |
