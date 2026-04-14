@@ -277,38 +277,23 @@ Tracker tickets (created when a dev confirms a bug) are internal-only and not me
 
 In `gleaptracker.config.ts`, set `gleap.trackerTicketType` to the type/board name you created (default is `"FOR-RELEASE"`).
 
-### 5. Run locally
-
-```bash
-pnpm dev
-```
-
-This starts Express on port **3000** (override with `PORT=3001 pnpm dev`). HTTP access logs use **morgan** (`combined` format).
-
-Use [ngrok](https://ngrok.com) to expose your local server for webhook testing:
-
-```bash
-ngrok http 3000
-```
-
----
-
-## Slack App Setup
+### 5. Slack App
 
 Create a new app at [api.slack.com/apps](https://api.slack.com/apps).
 
-### Required Bot Token Scopes (OAuth & Permissions)
+#### Required Bot Token Scopes (OAuth & Permissions)
 
-| Scope                   | Purpose                                  |
-| ----------------------- | ---------------------------------------- |
-| `chat:write`            | Post messages                            |
-| `chat:write.customize`  | Custom username/icon (optional)          |
-| `channels:history`      | Read channel messages for g:note         |
-| `conversations:history` | Read thread replies                      |
-| `metadata.message:read` | Read message metadata (ticket ID lookup) |
-| `users:read`            | Resolve user display names               |
+| Scope                    | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `chat:write`             | Post messages                                   |
+| `chat:write.customize`   | Custom username/icon (optional)                 |
+| `channels:history`       | Read channel messages for g:note                |
+| `conversations:history`  | Read thread replies                             |
+| `metadata.message:write` | Attach ticket ID metadata when posting messages |
+| `metadata.message:read`  | Read message metadata (ticket ID lookup)        |
+| `users:read`             | Resolve user display names                      |
 
-### Interactivity & Shortcuts
+#### Interactivity & Shortcuts
 
 Enable **Interactivity** and set the Request URL to:
 
@@ -316,7 +301,7 @@ Enable **Interactivity** and set the Request URL to:
 https://your-domain/api/slack
 ```
 
-### Event Subscriptions
+#### Event Subscriptions
 
 Enable **Event Subscriptions**, set Request URL to `https://your-domain/api/slack`, then subscribe to bot event:
 
@@ -324,22 +309,18 @@ Enable **Event Subscriptions**, set Request URL to `https://your-domain/api/slac
 
 This enables the `g:note` feature — type `g:note your note text` in any ticket thread to add an internal note to the linked Gleap ticket.
 
-### Install the app
+#### Install the app
 
 After setting up scopes, install the app to your workspace. Copy the **Bot User OAuth Token** to `SLACK_BOT_TOKEN` and the **Signing Secret** to `SLACK_SIGNING_SECRET` in `.env.local`.
 
----
-
-## Gleap Webhook Setup
+### 6. Gleap Webhook
 
 In Gleap: **Settings → Integrations → Webhooks → Add Webhook**
 
 - URL: `https://your-domain/api/webhooks/gleap`
 - Events: `ticket.created`, `ticket.updated`
 
----
-
-## Linear Webhook Setup
+### 7. Linear Webhook
 
 In Linear: **Settings → API → Webhooks → New Webhook**
 
@@ -347,11 +328,9 @@ In Linear: **Settings → API → Webhooks → New Webhook**
 - Data change events: **Issue**
 - Copy the signing secret to `LINEAR_WEBHOOK_SECRET` in `.env.local`
 
-The webhook fires when an issue is marked Done. GleapTracker looks for issues with the `gleap-tracker-ticket` label (configurable in `gleaptracker.ts`) and a title matching `[bugId] Title`.
+The webhook fires when an issue is marked Done. GleapTracker looks for issues with the `gleap-tracker-ticket` label (configurable in `gleaptracker.config.ts`) and a title matching `[bugId] Title`.
 
----
-
-## Jira Webhook Setup
+### 8. Jira Webhook
 
 In Jira: **Settings → System → WebHooks → Create a WebHook**
 
@@ -393,6 +372,22 @@ HTTP routes (same paths as before, for easy migration):
 | POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
 | POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |
 | GET    | `/health`                       | —                                      |
+
+---
+
+## Run locally
+
+```bash
+pnpm dev
+```
+
+This starts Express on port **3000** (override with `PORT=3001 pnpm dev`).
+
+Use [ngrok](https://ngrok.com) to expose your local server for webhook testing:
+
+```bash
+ngrok http 3000
+```
 
 ---
 
