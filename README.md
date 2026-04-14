@@ -474,7 +474,9 @@ gleaptracker/
 │       └── jira/client.ts
 ```
 
-HTTP routes (same paths as before, for easy migration):
+---
+
+## HTTP routes
 
 | Method | Path                            | Body                                   |
 | ------ | ------------------------------- | -------------------------------------- |
@@ -482,7 +484,7 @@ HTTP routes (same paths as before, for easy migration):
 | POST   | `/api/webhooks/linear`          | raw JSON (signature)                   |
 | POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
 | POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |
-| GET    | `/health`                       | —                                      |
+| GET    | `/health`                       | JSON                                   |
 
 ---
 
