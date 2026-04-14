@@ -6,6 +6,8 @@ An **Express** (Node.js) service that connects **Gleap** (customer support) with
 
 ## Workflow
 
+[![Watch the demo](https://img.youtube.com/vi/Vpwf07QsIrI/maxresdefault.jpg)](https://youtu.be/Vpwf07QsIrI)
+
 ```
 Customer reports bug in Gleap
          │
@@ -152,6 +154,16 @@ GleapTracker > Slack API: add message to the thread: "🔄 Reopened"
 When issue is resolved, support agent changes ticket status on Gleap to "Done"
 Status on Slack thread message changes to "✅ Closed" again
 ```
+
+## Adding internal notes to Gleap ticket from Slack thread
+
+Inside any ticket thread on Slack, team members can post an internal note directly to the linked Gleap ticket by including `g:note` anywhere in their message:
+
+```
+g:note Customer confirmed they're on v3.2, still reproducible
+```
+
+GleapTracker strips the `g:note` tag and adds the rest of the message as an internal note on the Gleap ticket (visible to agents only, not the customer). Useful for capturing context from Slack discussions without switching to Gleap.
 
 ---
 
