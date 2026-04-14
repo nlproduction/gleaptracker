@@ -1,4 +1,4 @@
-import config from "../../../gleaptracker"
+import config from "../../../gleaptracker.config"
 import { createJiraIssue } from "../jira/client"
 import { createLinearIssue } from "../linear/client"
 import { getGleapClient } from "./client"
@@ -59,7 +59,7 @@ const processLinkedTickets = async (
 
       const ops: Promise<unknown>[] = []
 
-      if (["OPEN", "INPROGRESS", ...cfg.onSlackStatuses].includes(ticket.status)) {
+      if (["OPEN", "INPROGRESS", cfg.onSlackStatus].includes(ticket.status)) {
         ops.push(
           gleap.tickets.update(ticket.id, { status: cfg.waitingStatus }).then((ok) => {
             if (ok) console.log(`[Tracker] Linked ticket ${ticket.id} → waiting status ✓`)

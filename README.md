@@ -205,7 +205,7 @@ Edit `gleaptracker.ts` in the project root. This file controls all non-secret se
 | ------------------------- | ------------------------------------------------------------- |
 | `gleap.workflowId`        | Gleap workflow ID run on linked tickets when issue is closed  |
 | `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)        |
-| `gleap.onSlackStatuses`   | Status values that trigger posting to Slack                   |
+| `gleap.onSlackStatus`     | Status value that triggers posting to Slack                   |
 | `gleap.waitingStatus`     | Status applied to linked tickets while fix is pending         |
 | `issueTracker`            | `"linear"` \| `"jira"` \| `"both"`                            |
 | `linear.teamId`           | Your Linear team ID                                           |
@@ -229,13 +229,55 @@ Several fields in `gleaptracker.ts` require internal Gleap status IDs (e.g. `"cz
 
 Fields that need these IDs:
 
-| Field                   | What it maps to in Gleap                          |
-| ----------------------- | ------------------------------------------------- |
-| `gleap.onSlackStatuses` | Your custom "Send to Slack" / "On Slack" status   |
-| `gleap.waitingStatus`   | Your "Waiting for Update" status                  |
-| `gleap.doneStatus`      | Your "Done / Closed" status (often just `"DONE"`) |
+| Field                 | What it maps to in Gleap                          |
+| --------------------- | ------------------------------------------------- |
+| `gleap.onSlackStatus` | Your custom "Send to Slack" / "On Slack" status   |
+| `gleap.waitingStatus` | Your "Waiting for Update" status                  |
+| `gleap.doneStatus`    | Your "Done / Closed" status (often just `"DONE"`) |
 
-### 4. Run locally
+### 4. Gleap workspace setup
+
+Before the integration can work, a few things need to be configured in Gleap itself.
+
+#### Custom ticket statuses
+
+Go to **Gleap → Settings → Ticket statuses** and create two custom statuses:
+
+| Purpose                                     | Suggested name                  | Used in config        |
+| ------------------------------------------- | ------------------------------- | --------------------- |
+| Ticket sent to Slack, awaiting dev decision | "On Slack" (any name)           | `gleap.onSlackStatus` |
+| Bug confirmed, fix in progress              | "Waiting for Update" (any name) | `gleap.waitingStatus` |
+
+These must be **custom** statuses (not the built-in ones) because Gleap's workflows that automatically close tickets without reply only trigger for "Open"/"In progress" statuses — custom statuses are excluded from automatic closing. This means tickets sitting in "On Slack" or "Waiting for Update" won't get auto-closed while the team is working on them.
+
+See [Finding Gleap status IDs](#finding-gleap-status-ids) below to get the raw ID strings to put in `gleaptracker.config.ts`.
+
+#### Follow-up workflows
+
+Gleap can automatically follow up with customers who haven't replied after an agent response. Set up two workflows under **Gleap → Automations → Workflows**:
+
+- **3-day follow-up**: trigger when no customer reply 3 days after agent reply, for tickets in `OPEN` or `INPROGRESS` status
+- **5-day follow-up / close**: trigger when no customer reply 5 days after agent reply, same statuses, closes the ticket.
+
+Make sure these workflows target **only** `OPEN` and `INPROGRESS` — do **not** include your custom "On Slack" or "Waiting for Update" statuses. Tickets in those statuses are intentionally on hold and should not receive follow-ups.
+
+#### "Send to Slack" message template
+
+In **Gleap → Settings → Message templates**, create a new template (e.g. "Send to Slack") that:
+
+1. Sends a message to the customer, e.g.:
+   > We've received your report and our team is reviewing it. We'll get back to you soon!
+2. Changes the ticket status to your custom "On Slack" status
+
+Support agents apply this template when a ticket needs dev attention. GleapTracker detects the status change via webhook and automatically posts the ticket to Slack.
+
+#### Tracker ticket board
+
+Tracker tickets (created when a dev confirms a bug) are internal-only and not meant to be opened or managed by support agents — they exist purely for automation. It's recommended to create a **dedicated board** in Gleap (e.g. "Trackers" or "For Release") to keep them out of the regular support queue.
+
+In `gleaptracker.config.ts`, set `gleap.trackerTicketType` to the type/board name you created (default is `"FOR-RELEASE"`).
+
+### 5. Run locally
 
 ```bash
 pnpm dev

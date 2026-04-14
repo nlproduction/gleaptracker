@@ -1,4 +1,4 @@
-import config from "../../../gleaptracker"
+import config from "../../../gleaptracker.config"
 
 const BASE_URL = "https://api.gleap.io/v3"
 const APP_BASE = "https://app.gleap.io/projects"

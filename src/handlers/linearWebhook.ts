@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import crypto from "crypto"
-import config from "../../gleaptracker"
+import config from "../../gleaptracker.config"
 import { getGleapClient } from "../integrations/gleap/client"
 
 const recentlyProcessed = new Set<string>()

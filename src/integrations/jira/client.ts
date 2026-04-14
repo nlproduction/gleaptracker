@@ -1,4 +1,4 @@
-import config from "../../../gleaptracker"
+import config from "../../../gleaptracker.config"
 import { getGleapTicketUrl } from "../gleap/client"
 
 export interface JiraIssueResult {

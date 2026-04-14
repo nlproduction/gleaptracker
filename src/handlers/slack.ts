@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { KnownBlock } from "@slack/web-api";
 import crypto from "crypto";
-import config from "../../gleaptracker";
+import config from "../../gleaptracker.config";
 import {
   getGleapClient,
   getGleapTicketUrl,

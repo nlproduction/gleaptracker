@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { KnownBlock } from "@slack/web-api";
-import config from "../../gleaptracker";
+import config from "../../gleaptracker.config";
 import {
   getGleapClient,
   getGleapTicketUrl,
@@ -275,7 +275,7 @@ const handleTicketReopened = async (ticket: GleapWebhookTicket) => {
   console.log(`[Gleap] Ticket ${ticket.id} reopened — Slack thread updated ✓`);
 };
 
-const ONSLACK_STATUSES = config.gleap.onSlackStatuses;
+const ONSLACK_STATUS = config.gleap.onSlackStatus;
 
 const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
   if (
@@ -286,7 +286,7 @@ const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
     return;
   }
 
-  const actionableStatuses = ["OPEN", "INPROGRESS", ...ONSLACK_STATUSES];
+  const actionableStatuses = ["OPEN", "INPROGRESS", ONSLACK_STATUS];
   if (!actionableStatuses.includes(ticket.status)) {
     console.log(
       `[Gleap] Ticket ${ticket.id} skipped — status "${ticket.status}" not actionable`,
@@ -294,7 +294,7 @@ const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
     return;
   }
 
-  if (ONSLACK_STATUSES.includes(ticket.status)) {
+  if (ticket.status === ONSLACK_STATUS) {
     if (ticket.formData?.slack_thread_ts) {
       await handleTicketReopened(ticket);
     } else {

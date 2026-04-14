@@ -5,8 +5,8 @@ export interface GleapConfig {
   workflowId?: string;
   /** Ticket type used for tracker/release tickets */
   trackerTicketType: string;
-  /** Gleap status IDs/names that mean "needs Slack discussion" */
-  onSlackStatuses: string[];
+  /** Gleap status ID that means "needs Slack discussion" */
+  onSlackStatus: string;
   /** Status value for closed/done tickets */
   doneStatus: string;
   /** Status value for "waiting for update" (applied to linked tickets) */
