@@ -29,6 +29,7 @@ interface GleapWebhookTicket {
   type: string;
   trackerTicket: boolean;
   plainContent?: string;
+  tags?: string[];
   reporter?: GleapReporter;
   contact?: GleapReporter;
   linkedTickets?: string[];
@@ -177,9 +178,22 @@ const handleTicketDone = async (ticket: GleapWebhookTicket) => {
   console.log(`[Gleap] Ticket ${ticket.id} marked as closed on Slack ✓`);
 };
 
-const handleOnSlack = async (ticket: GleapWebhookTicket) => {
+const sendToSlackAndSave = async (ticket: GleapWebhookTicket): Promise<string | null> => {
   const gleap = getGleapClient();
+  const result = await sendToSlack(ticket);
+  if (!result?.threadUrl) return null;
 
+  await Promise.all([
+    gleap.tickets.update(ticket.id, {
+      formData: { slack_thread: result.threadUrl, slack_thread_ts: result.threadTs },
+    }),
+    gleap.messages.addNote(ticket.id, `Sent to Slack: ${result.threadUrl}`),
+  ]);
+
+  return result.threadUrl;
+};
+
+const handleOnSlack = async (ticket: GleapWebhookTicket) => {
   if (ticket.formData?.slack_thread) {
     console.log(
       `[Gleap] Ticket ${ticket.id} already on Slack: ${ticket.formData.slack_thread}`,
@@ -195,22 +209,8 @@ const handleOnSlack = async (ticket: GleapWebhookTicket) => {
   slackSentTickets.add(ticket.id);
   setTimeout(() => slackSentTickets.delete(ticket.id), SLACK_DEDUP_TTL_MS);
 
-  const result = await sendToSlack(ticket);
-  if (!result?.threadUrl) return;
-
-  await Promise.all([
-    gleap.tickets.update(ticket.id, {
-      formData: {
-        slack_thread: result.threadUrl,
-        slack_thread_ts: result.threadTs,
-      },
-    }),
-    gleap.messages.addNote(ticket.id, `Sent to Slack: ${result.threadUrl}`),
-  ]);
-
-  console.log(
-    `[Gleap] Ticket ${ticket.id} sent to Slack: ${result.threadUrl} ✓`,
-  );
+  const threadUrl = await sendToSlackAndSave(ticket);
+  if (threadUrl) console.log(`[Gleap] Ticket ${ticket.id} sent to Slack: ${threadUrl} ✓`);
 };
 
 const handleTicketReopened = async (ticket: GleapWebhookTicket) => {
@@ -308,15 +308,53 @@ const handleTypeChange = async (ticket: GleapWebhookTicket) => {
 };
 
 const ONSLACK_STATUSES = config.gleap.onSlackStatuses;
+const ONSLACK_STATUS_VALUES = Object.values(ONSLACK_STATUSES) as string[];
+
+const handleSendToSlackTag = async (ticket: GleapWebhookTicket): Promise<boolean> => {
+  if (!ticket.tags?.includes("send-to-slack")) return false;
+
+  const gleap = getGleapClient();
+  const onSlackStatus = ONSLACK_STATUSES[ticket.type as keyof typeof ONSLACK_STATUSES];
+  if (!onSlackStatus) {
+    console.warn(`[Gleap] "send-to-slack" tag on ticket ${ticket.id} but type "${ticket.type}" has no onSlackStatus configured — skipping`);
+    return true;
+  }
+
+  const tagsWithoutFlag = (ticket.tags ?? []).filter((t) => t !== "send-to-slack");
+
+  if (ticket.formData?.slack_thread) {
+    // Already on Slack — just clean up the tag
+    console.log(`[Gleap] Ticket ${ticket.id} already on Slack — removing "send-to-slack" tag`);
+    await gleap.tickets.update(ticket.id, { tags: tagsWithoutFlag });
+    return true;
+  }
+
+  // Add to dedup set BEFORE the API update so the resulting webhook is ignored
+  slackSentTickets.add(ticket.id);
+  setTimeout(() => slackSentTickets.delete(ticket.id), SLACK_DEDUP_TTL_MS);
+
+  // Single atomic update: remove tag + set the correct "on Slack" status
+  await gleap.tickets.update(ticket.id, { tags: tagsWithoutFlag, status: onSlackStatus });
+  ticket.status = onSlackStatus;
+  ticket.tags = tagsWithoutFlag;
+
+  // Send to Slack directly — bypass handleOnSlack's dedup check since we own this trigger
+  const threadUrl = await sendToSlackAndSave(ticket);
+  if (threadUrl) console.log(`[Gleap] Ticket ${ticket.id} "send-to-slack" tag processed → ${threadUrl} ✓`);
+  return true;
+};
 
 const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
-  // Correct status when ticket type doesn't match the expected "send to Slack" status
-  if (ticket.type === "BUG" && ticket.status === "lm7lx3") {
-    await getGleapClient().tickets.update(ticket.id, { status: "cz2qz" });
-    ticket.status = "cz2qz";
-  } else if (ticket.type === "INQUIRY" && ticket.status === "cz2qz") {
-    await getGleapClient().tickets.update(ticket.id, { status: "lm7lx3" });
-    ticket.status = "lm7lx3";
+  // "send-to-slack" tag takes priority — process and stop
+  if (await handleSendToSlackTag(ticket)) return;
+
+  // Correct status when ticket type doesn't match the expected "on Slack" status
+  if (ticket.type === "BUG" && ticket.status === ONSLACK_STATUSES.INQUIRY) {
+    await getGleapClient().tickets.update(ticket.id, { status: ONSLACK_STATUSES.BUG });
+    ticket.status = ONSLACK_STATUSES.BUG;
+  } else if (ticket.type === "INQUIRY" && ticket.status === ONSLACK_STATUSES.BUG) {
+    await getGleapClient().tickets.update(ticket.id, { status: ONSLACK_STATUSES.INQUIRY });
+    ticket.status = ONSLACK_STATUSES.INQUIRY;
   }
 
   if (
@@ -327,7 +365,7 @@ const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
     return;
   }
 
-  const actionableStatuses = ["OPEN", "INPROGRESS", ...ONSLACK_STATUSES];
+  const actionableStatuses = ["OPEN", "INPROGRESS", ...ONSLACK_STATUS_VALUES];
   if (!actionableStatuses.includes(ticket.status)) {
     console.log(
       `[Gleap] Ticket ${ticket.id} skipped — status "${ticket.status}" not actionable`,
@@ -335,7 +373,7 @@ const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
     return;
   }
 
-  if (ONSLACK_STATUSES.includes(ticket.status)) {
+  if (ONSLACK_STATUS_VALUES.includes(ticket.status)) {
     if (ticket.formData?.slack_thread_ts) {
       await handleTicketReopened(ticket);
     } else {

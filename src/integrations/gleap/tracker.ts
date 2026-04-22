@@ -59,7 +59,7 @@ const processLinkedTickets = async (
 
       const ops: Promise<unknown>[] = []
 
-      if (["OPEN", "INPROGRESS", ...cfg.onSlackStatuses].includes(ticket.status)) {
+      if (["OPEN", "INPROGRESS", ...Object.values(cfg.onSlackStatuses)].includes(ticket.status)) {
         ops.push(
           gleap.tickets.update(ticket.id, { status: cfg.waitingStatus }).then((ok) => {
             if (ok) console.log(`[Tracker] Linked ticket ${ticket.id} → waiting status ✓`)

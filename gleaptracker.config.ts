@@ -22,8 +22,8 @@ const config: GleapTrackerConfig = {
     doneStatus: "DONE",
 
     /** SEE README.md on how to get custom status IDs from Gleap */
-    /** CUSTOM status values that trigger sending the ticket to the Slack channel */
-    onSlackStatuses: ["cz2qz", "lm7lx3"],
+    /** CUSTOM status IDs that trigger sending the ticket to the Slack channel */
+    onSlackStatuses: { BUG: "cz2qz", INQUIRY: "lm7lx3" },
     /** CUSTOM status values applied to linked customer tickets while fix is pending */
     waitingStatus: "9oyq7h",
 
