@@ -206,7 +206,7 @@ Edit `gleaptracker.ts` in the project root. This file controls all non-secret se
 | `gleap.workflowId`        | _(optional)_ Gleap workflow ID run on each linked ticket when the issue is closed — use this **or** `bugFixedMessage`, not both      |
 | `gleap.bugFixedMessage`   | _(optional)_ Plain-text message sent directly to each linked ticket when the issue is closed — fallback when `workflowId` is not set |
 | `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)                                                                               |
-| `gleap.onSlackStatus`     | Status value that triggers posting to Slack                                                                                          |
+| `gleap.onSlackStatuses`   | Array of status values that trigger posting to Slack (one per ticket type, e.g. `["cz2qz", "lm7lx3"]`)                              |
 | `gleap.waitingStatus`     | Status applied to linked tickets while fix is pending                                                                                |
 | `issueTracker`            | `"linear"` \| `"jira"` \| `"both"`                                                                                                   |
 | `linear.teamId`           | Your Linear team ID                                                                                                                  |
@@ -232,7 +232,7 @@ Fields that need these IDs:
 
 | Field                 | What it maps to in Gleap                          |
 | --------------------- | ------------------------------------------------- |
-| `gleap.onSlackStatus` | Your custom "Send to Slack" / "On Slack" status   |
+| `gleap.onSlackStatuses` | Your custom "Send to Slack" / "On Slack" statuses (array) |
 | `gleap.waitingStatus` | Your "Waiting for Update" status                  |
 | `gleap.doneStatus`    | Your "Done / Closed" status (often just `"DONE"`) |
 
@@ -246,7 +246,8 @@ Go to **Gleap → Bugs → Settings** and create two custom statuses:
 
 | Purpose                                     | Suggested name                  | Used in config        |
 | ------------------------------------------- | ------------------------------- | --------------------- |
-| Ticket sent to Slack, awaiting dev decision | "On Slack" (any name)           | `gleap.onSlackStatus` |
+| Ticket sent to Slack, awaiting dev decision (BUG)     | "On Slack" (any name) | `gleap.onSlackStatuses[0]` |
+| Ticket sent to Slack, awaiting dev decision (INQUIRY) | "On Slack" (any name) | `gleap.onSlackStatuses[1]` |
 | Bug confirmed, fix in progress              | "Waiting for Update" (any name) | `gleap.waitingStatus` |
 
 These must be **custom** statuses (not the built-in ones) because Gleap's workflows that automatically close tickets without reply only trigger for "Open"/"In progress" statuses — custom statuses are excluded from automatic closing. This means tickets sitting in "On Slack" or "Waiting for Update" won't get auto-closed while the team is working on them.
