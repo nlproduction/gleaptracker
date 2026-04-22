@@ -56,11 +56,14 @@ We're closing the ticket. Feel free to reply to reopen it if the issue persists.
   // Linear (required when issueTracker is "linear" or "both")
   // -------------------------------------------------------------------------
   linear: {
-    teamId: "your-linear-team-id",
+    teamId: "2fae8c28-5255-4e47-8f4d-00bee3fb118a",
     /** Label IDs applied to every created issue */
-    labelIds: ["label-id-1", "label-id-2"],
+    labelIds: [
+      "6eba01d2-186e-4e8a-8b79-170f9abebeb4",
+      "cacec15c-04c1-4b0f-9d7d-626b78b19246",
+    ],
     /** Workflow state ID for newly created issues (e.g. "Todo" / unstarted) */
-    stateId: "your-linear-state-id",
+    stateId: "f5cfd3be-1b9b-490a-b044-4cfd294ec040",
     /** Label name on Linear issues used to identify Gleap-linked ones */
     trackerLabel: "gleap-tracker-ticket",
     webhookSecret: process.env.LINEAR_WEBHOOK_SECRET!,
