@@ -57,6 +57,19 @@ interface GleapWebhookPayload {
 const slackSentTickets = new Set<string>();
 const SLACK_DEDUP_TTL_MS = 30_000;
 
+const buildActionsBlock = (ticketId: string, gleapUrl: string, showConfirmReject: boolean) => ({
+  type: "actions" as const,
+  elements: [
+    ...(showConfirmReject
+      ? [
+          { type: "button", text: { type: "plain_text", text: "Confirm" }, style: "primary", action_id: "confirm", value: ticketId },
+          { type: "button", text: { type: "plain_text", text: "Reject" }, action_id: "reject", value: ticketId },
+        ]
+      : []),
+    { type: "button", text: { type: "plain_text", text: "Open in Gleap ↗" }, action_id: "open_gleap", url: gleapUrl, value: ticketId },
+  ],
+});
+
 const sendToSlack = async (
   ticket: GleapWebhookTicket,
 ): Promise<{ threadUrl: string; threadTs: string } | null> => {
@@ -84,31 +97,7 @@ const sendToSlack = async (
         block_id: "status_block",
         text: { type: "mrkdwn", text: " " },
       },
-      {
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: { type: "plain_text", text: "Confirm" },
-            style: "primary",
-            action_id: "confirm",
-            value: ticket.id,
-          },
-          {
-            type: "button",
-            text: { type: "plain_text", text: "Reject" },
-            action_id: "reject",
-            value: ticket.id,
-          },
-          {
-            type: "button",
-            text: { type: "plain_text", text: "Open in Gleap ↗" },
-            action_id: "open_gleap",
-            url: gleapUrl,
-            value: ticket.id,
-          },
-        ],
-      },
+      buildActionsBlock(ticket.id, gleapUrl, ticket.type === "BUG"),
     ],
   });
 
@@ -275,9 +264,61 @@ const handleTicketReopened = async (ticket: GleapWebhookTicket) => {
   console.log(`[Gleap] Ticket ${ticket.id} reopened — Slack thread updated ✓`);
 };
 
-const ONSLACK_STATUS = config.gleap.onSlackStatus;
+const handleTypeChange = async (ticket: GleapWebhookTicket) => {
+  const threadTs = ticket.formData?.slack_thread_ts;
+  if (!threadTs) return;
+
+  const slack = getSlackClient();
+  const replies = await slack.conversations.replies({
+    channel: SLACK_CHANNEL_ID,
+    ts: threadTs,
+    limit: 1,
+  });
+  const root = replies.messages?.[0];
+  if (!root) return;
+
+  const existingBlocks = (root.blocks ?? []) as Array<Record<string, unknown>>;
+  const actionsBlock = existingBlocks.find((b) => b.type === "actions");
+  if (!actionsBlock) return;
+
+  const elements = (actionsBlock as Record<string, unknown>).elements as Array<Record<string, unknown>> | undefined ?? [];
+  const hasConfirmReject = elements.some(
+    (e) => e.action_id === "confirm" || e.action_id === "reject",
+  );
+  const isBug = ticket.type === "BUG";
+
+  if (isBug === hasConfirmReject) return; // already in correct state
+
+  const gleapUrl = getGleapTicketUrl(ticket.id, ticket.type);
+  const newActionsBlock = buildActionsBlock(ticket.id, gleapUrl, isBug);
+  const updatedBlocks = existingBlocks.map((b) =>
+    b.type === "actions" ? newActionsBlock : b,
+  ) as unknown as KnownBlock[];
+
+  await slack.chat.update({
+    channel: SLACK_CHANNEL_ID,
+    ts: threadTs,
+    text: (root.text as string) ?? "",
+    blocks: updatedBlocks,
+  });
+
+  console.log(
+    `[Gleap] Ticket ${ticket.id} type → "${ticket.type}" — Slack buttons ${isBug ? "added" : "removed"} ✓`,
+  );
+};
+
+const ONSLACK_STATUSES = config.gleap.onSlackStatuses;
 
 const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
+  // Correct status when ticket type doesn't match the expected "send to Slack" status
+  if (ticket.type === "BUG" && ticket.status === "lm7lx3") {
+    await getGleapClient().tickets.update(ticket.id, { status: "cz2qz" });
+    ticket.status = "cz2qz";
+  } else if (ticket.type === "INQUIRY" && ticket.status === "cz2qz") {
+    await getGleapClient().tickets.update(ticket.id, { status: "lm7lx3" });
+    ticket.status = "lm7lx3";
+  }
+
   if (
     ticket.status === config.gleap.doneStatus &&
     ticket.formData?.slack_thread_ts
@@ -286,7 +327,7 @@ const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
     return;
   }
 
-  const actionableStatuses = ["OPEN", "INPROGRESS", ONSLACK_STATUS];
+  const actionableStatuses = ["OPEN", "INPROGRESS", ...ONSLACK_STATUSES];
   if (!actionableStatuses.includes(ticket.status)) {
     console.log(
       `[Gleap] Ticket ${ticket.id} skipped — status "${ticket.status}" not actionable`,
@@ -294,12 +335,22 @@ const handleTicketUpdated = async (ticket: GleapWebhookTicket) => {
     return;
   }
 
-  if (ticket.status === ONSLACK_STATUS) {
+  if (ONSLACK_STATUSES.includes(ticket.status)) {
     if (ticket.formData?.slack_thread_ts) {
       await handleTicketReopened(ticket);
     } else {
       await handleOnSlack(ticket);
     }
+    return;
+  }
+
+  // Ticket has a Slack thread but hasn't been confirmed yet — handle type changes (BUG ↔ INQUIRY)
+  if (
+    ticket.formData?.slack_thread_ts &&
+    !ticket.formData?.linearIssueId &&
+    !ticket.formData?.jiraIssueId
+  ) {
+    await handleTypeChange(ticket);
     return;
   }
 
