@@ -110,14 +110,11 @@ export const processTrackerTicket = async (ticket: GleapTrackerTicket): Promise<
     return
   }
 
-  if (ticket.type !== cfg.gleap.trackerTicketType) {
-    console.log(
-      `[Tracker] Ticket ${ticket.id} skipped — type "${ticket.type}" is not "${cfg.gleap.trackerTicketType}"`,
-    )
-    return
-  }
-
   await withDedup(creatingTrackers, ticket.id, 60_000, async () => {
+    if (ticket.type !== cfg.gleap.trackerTicketType) {
+      await gleap.tickets.update(ticket.id, { type: cfg.gleap.trackerTicketType })
+      console.log(`[Tracker] Ticket ${ticket.id} type corrected to "${cfg.gleap.trackerTicketType}"`)
+    }
     const useLinear = cfg.issueTracker === "linear" || cfg.issueTracker === "both"
     const useJira = cfg.issueTracker === "jira" || cfg.issueTracker === "both"
 
