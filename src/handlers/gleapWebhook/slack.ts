@@ -10,8 +10,8 @@ const SLACK_CHANNEL_ID = config.slack.channelId;
 // Dedup guard — prevents duplicate Slack posts on concurrent webhooks
 // ---------------------------------------------------------------------------
 
-export const slackSentTickets = new Set<string>();
-export const SLACK_DEDUP_TTL_MS = 30_000;
+const slackSentTickets = new Set<string>();
+const SLACK_DEDUP_TTL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Block builders
@@ -69,7 +69,7 @@ export const sendToSlack = async (
   return { threadUrl: permalink.permalink, threadTs: msg.ts };
 };
 
-export const sendToSlackAndSave = async (ticket: GleapWebhookTicket): Promise<string | null> => {
+const sendToSlackAndSave = async (ticket: GleapWebhookTicket): Promise<string | null> => {
   const gleap = getGleapClient();
   const result = await sendToSlack(ticket);
   if (!result?.threadUrl) return null;
