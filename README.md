@@ -149,8 +149,11 @@ Edit `gleaptracker.config.ts` in the project root. This file controls all non-se
 | `github.closeBranches`    | Branches whose pushes close trackers via `Fixes Gleap-<trackerBugId>` (default: `["master"]`)                                        |
 | `followUp.cron`           | node-cron expression for the daily no-reply job (default `0 8 * * *`, or `FOLLOWUP_CRON`; set `off` to disable)                      |
 | `followUp.timezone`       | IANA timezone for that expression (default `UTC`, or `FOLLOWUP_TZ`)                                                                  |
-| `followUp.followUpAfterDays` | Days after the last **human** agent reply with no customer reply before the first nudge (default `3`, or `FOLLOWUP_AFTER_DAYS`)   |
-| `followUp.closeAfterDays` | Days after that same agent reply before close-no-reply (default `5`, or `FOLLOWUP_CLOSE_AFTER_DAYS`)                                 |
+| `followUp.followUpAfterDays` | Days after the last **human** agent reply with no customer reply before the BUG nudge (default `3`, or `FOLLOWUP_AFTER_DAYS`)   |
+| `followUp.closeAfterDays` | Days after that same agent reply before close-no-reply (default `7`, or `FOLLOWUP_CLOSE_AFTER_DAYS`)                                 |
+| `followUp.workflows.bugFollowUp` | Gleap workflow ID for the BUG 3-day nudge (`FOLLOWUP_BUG_FOLLOWUP_WORKFLOW_ID`) |
+| `followUp.workflows.bugClose` | Gleap workflow ID for the BUG 7-day close (`FOLLOWUP_BUG_CLOSE_WORKFLOW_ID`) |
+| `followUp.workflows.inquiryClose` | Gleap workflow ID for the INQUIRY 7-day close (`FOLLOWUP_INQUIRY_CLOSE_WORKFLOW_ID`). INQUIRY has no 3-day nudge. |
 | `linear.teamId`           | Your Linear team ID                                                                                                                  |
 | `linear.labelIds`         | Label IDs applied to created Linear issues                                                                                           |
 | `linear.stateId`          | Initial state ID for new Linear issues (e.g. "Todo")                                                                                 |
@@ -193,7 +196,7 @@ See [Finding Gleap status IDs](#finding-gleap-status-ids) below to get the raw I
 
 #### Daily follow-up / close-no-reply (in-process cron)
 
-Link to tracker does **not** set the old "On Slack" status, so Gleap-native "no customer reply" workflows are no longer a reliable skip for tracker-path tickets. gleaptracker runs that job itself.
+Link to tracker does **not** set the old "On Slack" status, so Gleap-native "no customer reply" automations are no longer a reliable skip for tracker-path tickets. gleaptracker runs the **schedule** itself and then invokes Gleap workflows for the customer-facing step.
 
 The Express process (the single PM2 instance) schedules a **node-cron** job — not BullMQ, not Redis, not a second worker.
 
@@ -201,31 +204,33 @@ The Express process (the single PM2 instance) schedules a **node-cron** job — 
 | --- | --- |
 | Schedule | `0 8 * * *` (08:00 every day) |
 | Timezone | `UTC` (override with `FOLLOWUP_TZ`, e.g. `Asia/Makassar` / WITA) |
-| First nudge | 3 days after the last **human** agent reply, if the customer has not replied since |
-| Close no-reply | 5 days after that same agent reply (matches the old Gleap 3-day / 5-day automations) |
+| BUG first nudge | 3 days after the last **human** agent reply → workflow `followUp.workflows.bugFollowUp` ("Follow-up 3 days") |
+| BUG close no-reply | 7 days after that same agent reply → workflow `followUp.workflows.bugClose` ("Follow-up 7 days") |
+| INQUIRY | no 3-day nudge; at 7 days → workflow `followUp.workflows.inquiryClose` ("Close Inbox Ticket - 7 days no reply") |
 
 Override with env (see `.env.local.example`):
 
 - `FOLLOWUP_CRON` — cron expression, or `off` / `false` / `disabled` to skip scheduling
 - `FOLLOWUP_TZ` — IANA timezone (default `UTC`; WITA is `Asia/Makassar`)
 - `FOLLOWUP_AFTER_DAYS` / `FOLLOWUP_CLOSE_AFTER_DAYS` — thresholds
+- `FOLLOWUP_BUG_FOLLOWUP_WORKFLOW_ID` / `FOLLOWUP_BUG_CLOSE_WORKFLOW_ID` / `FOLLOWUP_INQUIRY_CLOSE_WORKFLOW_ID` — workflow IDs
 
 The job lists each `(status, type)` pair separately (`OPEN`/`INPROGRESS` × `BUG`/`INQUIRY`) and dedupes by id (Gleap also accepts CSV filters; we do not depend on that). Then for each:
 
 1. **Skip** if the ticket has a linked tracker whose status is **not** `DONE` (OPEN and INPROGRESS trackers both count as active).
 2. **Skip** leftover parked lanes if they still appear (`On Slack`, `Waiting for Update`, snoozed). The job never writes Waiting.
 3. **Skip** when the last customer message is newer than the last human agent message, or when no human agent has replied yet (AI/bot greetings do not start the clock).
-4. Otherwise send `followUp.followUpMessage` or `followUp.closeMessage` and, at the close threshold, set the customer ticket to `DONE`.
-5. Same-day re-runs are idempotent: a stable `[gleaptracker:follow-up]` / `[gleaptracker:noreply-close]` token plus `formData.noreply_*_sent_at` flags, not a full-template string match.
-6. Immediately before send, the job re-fetches the ticket, linked tracker, and messages and re-runs the decision. If an agent just linked a tracker or the customer replied, the send is skipped.
+4. Otherwise call `tickets.runWorkflow(ticketId, workflowId)` for the matching workflow. The cron does **not** `sendMessage` hardcoded bot text, and it does **not** set `DONE` itself — the workflow owns customer messaging and status.
+5. Same-day re-runs are idempotent via `formData.noreply_followup_workflow_sent_at` / `noreply_close_workflow_sent_at` (legacy `noreply_*_sent_at` flags from the old bot-message path still count as already-acted). The flag is written before `runWorkflow`.
+6. Immediately before invoke, the job re-fetches the ticket, linked tracker, and messages and re-runs the decision. If an agent just linked a tracker or the customer replied, the workflow is skipped.
 
 Each run logs `scanned / skipped-linked-tracker / skipped-parked / skipped-waiting-on-us / skipped-too-soon / skipped-already-acted / skipped-stale / skipped-overlap / followed-up / closed / errors`. Gleap API calls are sequential with a short delay. A second `runFollowUpJob` in the same process no-ops (`skipped-overlap`) while one is running.
 
 **PM2:** run **one** process (`instances: 1` in `ecosystem.config.cjs`). Multi-instance deploy is **unsupported** for this cron — both `noOverlap` and the in-process mutex are single-process only.
 
-Disable the old Gleap 3-day / 5-day automations for this support flow so customers are not double-messaged. Editing those dashboard workflows is out of band for this repo.
+**Gleap dashboard:** keep these three workflows on trigger **none** (publish draft → live without an on-ticket-no-response auto trigger). Only this cron should start them. Do not also enable Gleap-native "no reply" automations for the same tickets, or customers will be double-messaged.
 
-The job does not start when `NODE_ENV=test` or Vitest is running.
+`followUp.followUpMessage` / `followUp.closeMessage` are unused on this path (left in config as a reference). The job does not start when `NODE_ENV=test` or Vitest is running.
 
 #### Link to tracker (creates Slack)
 

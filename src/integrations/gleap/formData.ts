@@ -1,6 +1,12 @@
 import { getGleapClient } from "./client"
 
 export const FOLLOWUP_FORM = {
+  followUpSentAt: "noreply_followup_workflow_sent_at",
+  closeSentAt: "noreply_close_workflow_sent_at",
+} as const
+
+/** Pre-workflow bot-message flags — still count as already-acted. */
+const LEGACY_FOLLOWUP_FORM = {
   followUpSentAt: "noreply_followup_sent_at",
   closeSentAt: "noreply_close_sent_at",
 } as const
@@ -36,8 +42,12 @@ export interface FollowUpFormState {
 export const readFollowUpForm = (
   formData?: Record<string, unknown>,
 ): FollowUpFormState => ({
-  followUpSentAt: asString(formData?.[FOLLOWUP_FORM.followUpSentAt]),
-  closeSentAt: asString(formData?.[FOLLOWUP_FORM.closeSentAt]),
+  followUpSentAt:
+    asString(formData?.[FOLLOWUP_FORM.followUpSentAt]) ||
+    asString(formData?.[LEGACY_FOLLOWUP_FORM.followUpSentAt]),
+  closeSentAt:
+    asString(formData?.[FOLLOWUP_FORM.closeSentAt]) ||
+    asString(formData?.[LEGACY_FOLLOWUP_FORM.closeSentAt]),
 })
 
 export const readTrackerForm = (

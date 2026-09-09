@@ -7,14 +7,12 @@ import { parseEnvNumber } from "../types/config"
 import {
   analyzeConversation,
   classifyMessage,
-  CLOSE_MARK,
-  composeCloseMessage,
-  composeFollowUpMessage,
   daysBetween,
   decideFollowUpAction,
   decideForTicket,
-  FOLLOWUP_MARK,
+  resolveFollowUpWorkflowId,
   shouldSkipLinkedActiveTracker,
+  ticketAllowsSoftFollowUp,
 } from "./followUpDecision"
 
 const hoursAgo = (hours: number, now = new Date("2026-09-09T08:00:00.000Z")): Date =>
@@ -67,11 +65,6 @@ const msg = (
     text,
     ...extra,
   }
-}
-
-const templates = {
-  followUpMessage: config.followUp.followUpMessage,
-  closeMessage: config.followUp.closeMessage,
 }
 
 describe("parseEnvNumber", () => {
@@ -165,7 +158,8 @@ describe("decideFollowUpAction — thresholds and idempotency", () => {
     alreadySentFollowUp: false,
     alreadySentClose: false,
     followUpAfterDays: 3,
-    closeAfterDays: 5,
+    closeAfterDays: 7,
+    ticketType: "BUG",
   }
 
   it("does nothing when no human agent has replied", () => {
@@ -192,7 +186,7 @@ describe("decideFollowUpAction — thresholds and idempotency", () => {
     })
   })
 
-  it("sends a follow-up at 3 days with no customer reply", () => {
+  it("sends a follow-up at 3 days with no customer reply (BUG)", () => {
     expect(decideFollowUpAction({ ...base, lastAgentAt: hoursAgo(72) })).toEqual({
       action: "follow_up",
     })
@@ -208,25 +202,69 @@ describe("decideFollowUpAction — thresholds and idempotency", () => {
     ).toEqual({ action: "none", reason: "already_acted" })
   })
 
-  it("closes at 5 days even if a 3-day follow-up was already sent", () => {
+  it("closes at 7 days even if a 3-day follow-up was already sent", () => {
     expect(
       decideFollowUpAction({
         ...base,
-        lastAgentAt: hoursAgo(120),
+        lastAgentAt: hoursAgo(168),
         alreadySentFollowUp: true,
       }),
     ).toEqual({ action: "close" })
   })
 
-  it("closes at 5 days when no follow-up was sent (job missed a day)", () => {
-    expect(decideFollowUpAction({ ...base, lastAgentAt: hoursAgo(120) })).toEqual({
+  it("closes at 7 days when no follow-up was sent (job missed a day)", () => {
+    expect(decideFollowUpAction({ ...base, lastAgentAt: hoursAgo(168) })).toEqual({
       action: "close",
     })
   })
 
+  it("does not re-close when the close workflow flag is already set", () => {
+    expect(
+      decideFollowUpAction({
+        ...base,
+        lastAgentAt: hoursAgo(170),
+        alreadySentClose: true,
+      }),
+    ).toEqual({ action: "none", reason: "already_acted" })
+  })
+
+  it("does not follow up INQUIRY at 3 days — waits for the close threshold", () => {
+    expect(
+      decideFollowUpAction({
+        ...base,
+        ticketType: "INQUIRY",
+        lastAgentAt: hoursAgo(80),
+      }),
+    ).toEqual({ action: "none", reason: "too_soon" })
+  })
+
+  it("closes INQUIRY at 7 days with no soft follow-up", () => {
+    expect(
+      decideFollowUpAction({
+        ...base,
+        ticketType: "INQUIRY",
+        lastAgentAt: hoursAgo(168),
+      }),
+    ).toEqual({ action: "close" })
+  })
+
   it("uses elapsed days, not calendar midnights", () => {
     expect(daysBetween(hoursAgo(72), now)).toBe(3)
-    expect(daysBetween(hoursAgo(119.9), now)).toBeLessThan(5)
+    expect(daysBetween(hoursAgo(167.9), now)).toBeLessThan(7)
+  })
+})
+
+describe("ticket type → workflow", () => {
+  it("maps BUG follow-up / close and INQUIRY close only", () => {
+    expect(ticketAllowsSoftFollowUp("BUG")).toBe(true)
+    expect(ticketAllowsSoftFollowUp("INQUIRY")).toBe(false)
+    expect(resolveFollowUpWorkflowId("BUG", "follow_up")).toBe(
+      config.followUp.workflows.bugFollowUp,
+    )
+    expect(resolveFollowUpWorkflowId("BUG", "close")).toBe(config.followUp.workflows.bugClose)
+    expect(resolveFollowUpWorkflowId("INQUIRY", "close")).toBe(
+      config.followUp.workflows.inquiryClose,
+    )
   })
 })
 
@@ -264,47 +302,40 @@ describe("analyzeConversation + classifyMessage", () => {
     const oldestFirst = [agent, customer]
     const newestFirst = [customer, agent]
 
-    const a = analyzeConversation(oldestFirst, templates)
-    const b = analyzeConversation(newestFirst, templates)
+    const a = analyzeConversation(oldestFirst)
+    const b = analyzeConversation(newestFirst)
     expect(a.lastAgentAt).toEqual(hoursAgo(80))
     expect(a.lastCustomerAt).toEqual(hoursAgo(10))
     expect(b.lastAgentAt).toEqual(a.lastAgentAt)
     expect(b.lastCustomerAt).toEqual(a.lastCustomerAt)
   })
 
-  it("treats our bot follow-up as already-sent and does not reset the agent clock", () => {
-    const cursor = analyzeConversation(
-      [
-        msg("agent", hoursAgo(80), "Can you share a screenshot?"),
-        msg("bot", hoursAgo(8), composeFollowUpMessage(templates.followUpMessage)),
-      ],
-      templates,
-    )
+  it("does not treat a bot message as a human agent reply or as already-sent", () => {
+    const cursor = analyzeConversation([
+      msg("agent", hoursAgo(80), "Can you share a screenshot?"),
+      msg("bot", hoursAgo(8), "Just checking in — do you have any updates on this?"),
+    ])
     expect(cursor.lastAgentAt).toEqual(hoursAgo(80))
-    expect(cursor.alreadySentFollowUp).toBe(true)
+    expect(cursor.alreadySentFollowUp).toBe(false)
     expect(cursor.lastCustomerAt).toBeUndefined()
   })
 
-  it("counts a reshaped / whitespace-only body as already sent when the mark is present", () => {
-    const reshaped = `Just checking in\n\n\ndo you have   any updates on this?\n\n${FOLLOWUP_MARK}`
-    const newestFirst = [
-      msg("bot", hoursAgo(2), reshaped),
-      msg("agent", hoursAgo(80), "ping"),
-    ]
-    const oldestFirst = [...newestFirst].reverse()
-    expect(analyzeConversation(newestFirst, templates).alreadySentFollowUp).toBe(true)
-    expect(analyzeConversation(oldestFirst, templates).alreadySentFollowUp).toBe(true)
-  })
-
-  it("honors formData noreply flags without requiring the full template text", () => {
-    const cursor = analyzeConversation([msg("agent", hoursAgo(80))], templates, {
+  it("honors formData noreply workflow flags without inspecting bot text", () => {
+    const cursor = analyzeConversation([msg("agent", hoursAgo(80))], {
       [FOLLOWUP_FORM.followUpSentAt]: hoursAgo(2).toISOString(),
     })
     expect(cursor.alreadySentFollowUp).toBe(true)
   })
 
+  it("honors legacy bot-message formData flags so those tickets are not double-nudged", () => {
+    const cursor = analyzeConversation([msg("agent", hoursAgo(80))], {
+      noreply_followup_sent_at: hoursAgo(2).toISOString(),
+    })
+    expect(cursor.alreadySentFollowUp).toBe(true)
+  })
+
   it("does not treat an older formData flag as already-sent after a newer agent reply", () => {
-    const cursor = analyzeConversation([msg("agent", hoursAgo(2))], templates, {
+    const cursor = analyzeConversation([msg("agent", hoursAgo(2))], {
       [FOLLOWUP_FORM.followUpSentAt]: hoursAgo(80).toISOString(),
     })
     expect(cursor.alreadySentFollowUp).toBe(false)
@@ -314,21 +345,19 @@ describe("analyzeConversation + classifyMessage", () => {
     const cursor = analyzeConversation(
       [
         msg("agent", hoursAgo(200), "First reply"),
-        msg("bot", hoursAgo(120), composeFollowUpMessage(templates.followUpMessage)),
+        msg("bot", hoursAgo(120), "old follow-up"),
         msg("agent", hoursAgo(80), "Following up myself"),
       ],
-      templates,
+      { [FOLLOWUP_FORM.followUpSentAt]: hoursAgo(120).toISOString() },
     )
     expect(cursor.lastAgentAt).toEqual(hoursAgo(80))
     expect(cursor.alreadySentFollowUp).toBe(false)
   })
 
-  it("detects an already-sent close via mark so the job can skip the customer text", () => {
-    const cursor = analyzeConversation(
-      [msg("agent", hoursAgo(130)), msg("bot", hoursAgo(1), composeCloseMessage(templates.closeMessage))],
-      templates,
-    )
+  it("detects an already-run close workflow via formData", () => {
+    const cursor = analyzeConversation([msg("agent", hoursAgo(170))], {
+      [FOLLOWUP_FORM.closeSentAt]: hoursAgo(1).toISOString(),
+    })
     expect(cursor.alreadySentClose).toBe(true)
-    expect(CLOSE_MARK).toContain("gleaptracker")
   })
 })

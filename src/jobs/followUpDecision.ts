@@ -6,6 +6,7 @@ import {
   type GleapTicket,
 } from "../integrations/gleap/client"
 import { readFollowUpForm } from "../integrations/gleap/formData"
+import type { FollowUpWorkflowIds } from "../types/config"
 
 export type FollowUpKind = "none" | "follow_up" | "close"
 
@@ -24,16 +25,6 @@ export type FollowUpDecision =
   | { action: "none"; reason: SkipReason }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-
-/** Stable tokens appended to outbound bot text so TipTap reshape still matches. */
-export const FOLLOWUP_MARK = "[gleaptracker:follow-up]"
-export const CLOSE_MARK = "[gleaptracker:noreply-close]"
-
-export const composeFollowUpMessage = (body: string): string =>
-  `${body.trim()}\n\n${FOLLOWUP_MARK}`
-
-export const composeCloseMessage = (body: string): string =>
-  `${body.trim()}\n\n${CLOSE_MARK}`
 
 export const parkedCustomerStatuses = (): Set<string> => {
   const cfg = config.gleap
@@ -63,6 +54,19 @@ export const shouldSkipCustomerTicket = (
   return null
 }
 
+/** INQUIRY goes straight to the close workflow — no 3-day nudge. */
+export const ticketAllowsSoftFollowUp = (ticketType?: string): boolean =>
+  (ticketType ?? "BUG").toUpperCase() !== "INQUIRY"
+
+export const resolveFollowUpWorkflowId = (
+  ticketType: string,
+  action: Exclude<FollowUpKind, "none">,
+  workflows: FollowUpWorkflowIds = config.followUp.workflows,
+): string => {
+  if (action === "follow_up") return workflows.bugFollowUp
+  return ticketType.toUpperCase() === "INQUIRY" ? workflows.inquiryClose : workflows.bugClose
+}
+
 export const normalizeMessageText = (text: string): string =>
   text.replace(/\s+/g, " ").trim()
 
@@ -81,9 +85,6 @@ export const messagePlainText = (message: GleapMessage): string => {
   if (typeof message.comment === "string" && message.comment.trim()) return message.comment
   return flattenRichText(message.data?.content)
 }
-
-export const messageHasMark = (text: string, mark: string): boolean =>
-  normalizeMessageText(text).includes(mark)
 
 export type MessageRole = "customer" | "agent" | "bot" | "ignore"
 
@@ -132,23 +133,17 @@ const parseFormDate = (raw: string): Date | undefined => {
 
 export const analyzeConversation = (
   messages: GleapMessage[],
-  templates: { followUpMessage: string; closeMessage: string },
   formData?: Record<string, unknown>,
 ): ConversationCursor => {
-  const followUpNorm = normalizeMessageText(templates.followUpMessage)
-  const closeNorm = normalizeMessageText(templates.closeMessage)
   const flags = readFollowUpForm(formData)
 
   let lastCustomerAt: Date | undefined
   let lastAgentAt: Date | undefined
-  let lastFollowUpAt: Date | undefined
-  let lastCloseAt: Date | undefined
 
   for (const message of messages) {
     const created = new Date(message.createdAt)
     if (Number.isNaN(created.getTime())) continue
     const role = classifyMessage(message)
-    const text = normalizeMessageText(messagePlainText(message))
 
     if (role === "customer") {
       lastCustomerAt = later(lastCustomerAt, created)
@@ -156,26 +151,14 @@ export const analyzeConversation = (
     }
     if (role === "agent") {
       lastAgentAt = later(lastAgentAt, created)
-      continue
     }
-    if (role !== "bot") continue
-
-    const isFollowUp =
-      messageHasMark(text, FOLLOWUP_MARK) || (!!followUpNorm && text.includes(followUpNorm))
-    const isClose = messageHasMark(text, CLOSE_MARK) || (!!closeNorm && text.includes(closeNorm))
-    if (isFollowUp) lastFollowUpAt = later(lastFollowUpAt, created)
-    if (isClose) lastCloseAt = later(lastCloseAt, created)
   }
 
   return {
     lastCustomerAt,
     lastAgentAt,
-    alreadySentFollowUp:
-      sentAfterAgent(lastFollowUpAt, lastAgentAt) ||
-      sentAfterAgent(parseFormDate(flags.followUpSentAt), lastAgentAt),
-    alreadySentClose:
-      sentAfterAgent(lastCloseAt, lastAgentAt) ||
-      sentAfterAgent(parseFormDate(flags.closeSentAt), lastAgentAt),
+    alreadySentFollowUp: sentAfterAgent(parseFormDate(flags.followUpSentAt), lastAgentAt),
+    alreadySentClose: sentAfterAgent(parseFormDate(flags.closeSentAt), lastAgentAt),
   }
 }
 
@@ -187,6 +170,7 @@ export interface DecideFollowUpInput {
   alreadySentClose: boolean
   followUpAfterDays: number
   closeAfterDays: number
+  ticketType?: string
 }
 
 export const daysBetween = (from: Date, to: Date): number =>
@@ -202,7 +186,12 @@ export const decideFollowUpAction = (input: DecideFollowUpInput): FollowUpDecisi
   const waited = daysBetween(input.lastAgentAt, input.now)
 
   if (waited >= input.closeAfterDays) {
+    if (input.alreadySentClose) return { action: "none", reason: "already_acted" }
     return { action: "close" }
+  }
+
+  if (!ticketAllowsSoftFollowUp(input.ticketType)) {
+    return { action: "none", reason: "too_soon" }
   }
 
   if (waited >= input.followUpAfterDays) {
@@ -223,7 +212,7 @@ export const decideForTicket = (
   const skip = shouldSkipCustomerTicket(ticket, tracker)
   if (skip) return { action: "none", reason: skip }
 
-  const cursor = analyzeConversation(messages, followUp, ticket.formData)
+  const cursor = analyzeConversation(messages, ticket.formData)
   return decideFollowUpAction({
     now,
     lastCustomerAt: cursor.lastCustomerAt,
@@ -232,5 +221,6 @@ export const decideForTicket = (
     alreadySentClose: cursor.alreadySentClose,
     followUpAfterDays: followUp.followUpAfterDays,
     closeAfterDays: followUp.closeAfterDays,
+    ticketType: ticket.type,
   })
 }
