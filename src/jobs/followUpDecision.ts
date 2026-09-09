@@ -5,6 +5,7 @@ import {
   type GleapMessage,
   type GleapTicket,
 } from "../integrations/gleap/client"
+import { readFollowUpForm } from "../integrations/gleap/formData"
 
 export type FollowUpKind = "none" | "follow_up" | "close"
 
@@ -16,12 +17,23 @@ export type SkipReason =
   | "no_agent_reply"
   | "already_acted"
   | "too_soon"
+  | "stale"
 
 export type FollowUpDecision =
   | { action: FollowUpKind; reason?: undefined }
   | { action: "none"; reason: SkipReason }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/** Stable tokens appended to outbound bot text so TipTap reshape still matches. */
+export const FOLLOWUP_MARK = "[gleaptracker:follow-up]"
+export const CLOSE_MARK = "[gleaptracker:noreply-close]"
+
+export const composeFollowUpMessage = (body: string): string =>
+  `${body.trim()}\n\n${FOLLOWUP_MARK}`
+
+export const composeCloseMessage = (body: string): string =>
+  `${body.trim()}\n\n${CLOSE_MARK}`
 
 export const parkedCustomerStatuses = (): Set<string> => {
   const cfg = config.gleap
@@ -70,17 +82,26 @@ export const messagePlainText = (message: GleapMessage): string => {
   return flattenRichText(message.data?.content)
 }
 
+export const messageHasMark = (text: string, mark: string): boolean =>
+  normalizeMessageText(text).includes(mark)
+
 export type MessageRole = "customer" | "agent" | "bot" | "ignore"
 
 export const classifyMessage = (message: GleapMessage): MessageRole => {
   const type = (message.type ?? "").toUpperCase()
   if (type === "NOTE") return "ignore"
   if (message.senderType === "system") return "ignore"
-  if (message.senderType === "user" || type === "USER_TEXT" || type === "BOT_REPLY") {
-    return "customer"
-  }
+  if (message.senderType === "user" || type === "USER_TEXT") return "customer"
   if (message.senderType === "agent") return "agent"
-  if (message.senderType === "bot" || type === "BOT" || message.bot === true) return "bot"
+  // BOT_REPLY without senderType=user is the bot/AI turn, not a customer reply.
+  if (
+    message.senderType === "bot" ||
+    type === "BOT" ||
+    type === "BOT_REPLY" ||
+    message.bot === true
+  ) {
+    return "bot"
+  }
   if (type === "SHARED_COMMENT") return "customer"
   if (message.user && !message.bot) return "agent"
   if (message.session) return "customer"
@@ -94,16 +115,34 @@ export interface ConversationCursor {
   alreadySentClose: boolean
 }
 
+const later = (current: Date | undefined, next: Date): Date =>
+  !current || next.getTime() > current.getTime() ? next : current
+
+const sentAfterAgent = (sentAt: Date | undefined, lastAgentAt?: Date): boolean => {
+  if (!sentAt) return false
+  if (!lastAgentAt) return true
+  return sentAt.getTime() >= lastAgentAt.getTime()
+}
+
+const parseFormDate = (raw: string): Date | undefined => {
+  if (!raw) return undefined
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
 export const analyzeConversation = (
   messages: GleapMessage[],
   templates: { followUpMessage: string; closeMessage: string },
+  formData?: Record<string, unknown>,
 ): ConversationCursor => {
   const followUpNorm = normalizeMessageText(templates.followUpMessage)
   const closeNorm = normalizeMessageText(templates.closeMessage)
-  const cursor: ConversationCursor = {
-    alreadySentFollowUp: false,
-    alreadySentClose: false,
-  }
+  const flags = readFollowUpForm(formData)
+
+  let lastCustomerAt: Date | undefined
+  let lastAgentAt: Date | undefined
+  let lastFollowUpAt: Date | undefined
+  let lastCloseAt: Date | undefined
 
   for (const message of messages) {
     const created = new Date(message.createdAt)
@@ -112,22 +151,32 @@ export const analyzeConversation = (
     const text = normalizeMessageText(messagePlainText(message))
 
     if (role === "customer") {
-      cursor.lastCustomerAt = created
+      lastCustomerAt = later(lastCustomerAt, created)
       continue
     }
     if (role === "agent") {
-      cursor.lastAgentAt = created
-      cursor.alreadySentFollowUp = false
-      cursor.alreadySentClose = false
+      lastAgentAt = later(lastAgentAt, created)
       continue
     }
     if (role !== "bot") continue
 
-    if (text && text === followUpNorm) cursor.alreadySentFollowUp = true
-    if (text && text === closeNorm) cursor.alreadySentClose = true
+    const isFollowUp =
+      messageHasMark(text, FOLLOWUP_MARK) || (!!followUpNorm && text.includes(followUpNorm))
+    const isClose = messageHasMark(text, CLOSE_MARK) || (!!closeNorm && text.includes(closeNorm))
+    if (isFollowUp) lastFollowUpAt = later(lastFollowUpAt, created)
+    if (isClose) lastCloseAt = later(lastCloseAt, created)
   }
 
-  return cursor
+  return {
+    lastCustomerAt,
+    lastAgentAt,
+    alreadySentFollowUp:
+      sentAfterAgent(lastFollowUpAt, lastAgentAt) ||
+      sentAfterAgent(parseFormDate(flags.followUpSentAt), lastAgentAt),
+    alreadySentClose:
+      sentAfterAgent(lastCloseAt, lastAgentAt) ||
+      sentAfterAgent(parseFormDate(flags.closeSentAt), lastAgentAt),
+  }
 }
 
 export interface DecideFollowUpInput {
@@ -165,7 +214,7 @@ export const decideFollowUpAction = (input: DecideFollowUpInput): FollowUpDecisi
 }
 
 export const decideForTicket = (
-  ticket: Pick<GleapTicket, "status" | "type" | "trackerTicket">,
+  ticket: Pick<GleapTicket, "status" | "type" | "trackerTicket" | "formData">,
   tracker: Pick<GleapTicket, "status"> | null | undefined,
   messages: GleapMessage[],
   now: Date,
@@ -174,7 +223,7 @@ export const decideForTicket = (
   const skip = shouldSkipCustomerTicket(ticket, tracker)
   if (skip) return { action: "none", reason: skip }
 
-  const cursor = analyzeConversation(messages, followUp)
+  const cursor = analyzeConversation(messages, followUp, ticket.formData)
   return decideFollowUpAction({
     now,
     lastCustomerAt: cursor.lastCustomerAt,

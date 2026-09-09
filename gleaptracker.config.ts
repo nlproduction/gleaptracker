@@ -6,7 +6,7 @@
  *
  * Fields that reference process.env must be set in .env.local.
  */
-import type { GleapTrackerConfig } from "./src/types/config";
+import { parseEnvNumber, type GleapTrackerConfig } from "./src/types/config";
 
 const config: GleapTrackerConfig = {
   // -------------------------------------------------------------------------
@@ -47,8 +47,8 @@ We're closing the ticket. Feel free to reply to reopen it if the issue persists.
   followUp: {
     cron: process.env.FOLLOWUP_CRON || "0 8 * * *",
     timezone: process.env.FOLLOWUP_TZ || "UTC",
-    followUpAfterDays: Number(process.env.FOLLOWUP_AFTER_DAYS) || 3,
-    closeAfterDays: Number(process.env.FOLLOWUP_CLOSE_AFTER_DAYS) || 5,
+    followUpAfterDays: parseEnvNumber(process.env.FOLLOWUP_AFTER_DAYS, 3),
+    closeAfterDays: parseEnvNumber(process.env.FOLLOWUP_CLOSE_AFTER_DAYS, 5),
     followUpMessage: `Just checking in — do you have any updates on this?
 
 If we don't hear back, we'll close the ticket. Reply anytime and we'll pick it up.`,

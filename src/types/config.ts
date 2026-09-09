@@ -17,6 +17,13 @@ export interface GleapConfig {
   bugFixedMessage?: string;
 }
 
+/** Parse a numeric env var. Empty/invalid → fallback; explicit `0` is kept. */
+export const parseEnvNumber = (raw: string | undefined, fallback: number): number => {
+  if (raw == null || raw.trim() === "") return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : fallback
+}
+
 export interface FollowUpConfig {
   /** node-cron expression; default `0 8 * * *` (08:00 every day). Set `off` to disable. */
   cron: string;

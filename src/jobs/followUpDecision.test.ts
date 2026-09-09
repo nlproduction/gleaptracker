@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest"
 import config from "../../gleaptracker.config"
+import { FOLLOWUP_FORM } from "../integrations/gleap/formData"
 import type { GleapMessage } from "../integrations/gleap/client"
 import { customerTicket, trackerTicket } from "../test/fixtures"
+import { parseEnvNumber } from "../types/config"
 import {
   analyzeConversation,
   classifyMessage,
+  CLOSE_MARK,
+  composeCloseMessage,
+  composeFollowUpMessage,
   daysBetween,
   decideFollowUpAction,
   decideForTicket,
+  FOLLOWUP_MARK,
   shouldSkipLinkedActiveTracker,
 } from "./followUpDecision"
 
@@ -20,9 +26,16 @@ const msg = (
   role: "customer" | "agent" | "bot" | "note",
   createdAt: Date,
   text = "",
+  extra: Partial<GleapMessage> = {},
 ): GleapMessage => {
   if (role === "note") {
-    return { id: createdAt.toISOString(), type: "NOTE", createdAt: createdAt.toISOString(), text }
+    return {
+      id: createdAt.toISOString(),
+      type: "NOTE",
+      createdAt: createdAt.toISOString(),
+      text,
+      ...extra,
+    }
   }
   if (role === "customer") {
     return {
@@ -31,6 +44,7 @@ const msg = (
       senderType: "user",
       createdAt: createdAt.toISOString(),
       text,
+      ...extra,
     }
   }
   if (role === "agent") {
@@ -41,6 +55,7 @@ const msg = (
       bot: false,
       createdAt: createdAt.toISOString(),
       text,
+      ...extra,
     }
   }
   return {
@@ -50,6 +65,7 @@ const msg = (
     bot: true,
     createdAt: createdAt.toISOString(),
     text,
+    ...extra,
   }
 }
 
@@ -57,6 +73,15 @@ const templates = {
   followUpMessage: config.followUp.followUpMessage,
   closeMessage: config.followUp.closeMessage,
 }
+
+describe("parseEnvNumber", () => {
+  it("keeps an explicit 0 and falls back on empty/invalid", () => {
+    expect(parseEnvNumber("0", 3)).toBe(0)
+    expect(parseEnvNumber("", 3)).toBe(3)
+    expect(parseEnvNumber(undefined, 3)).toBe(3)
+    expect(parseEnvNumber("nope", 5)).toBe(5)
+  })
+})
 
 describe("shouldSkipLinkedActiveTracker", () => {
   it("does not skip when there is no linked tracker", () => {
@@ -217,16 +242,41 @@ describe("analyzeConversation + classifyMessage", () => {
       "bot",
     )
     expect(classifyMessage({ id: "4", createdAt: now.toISOString(), type: "NOTE" })).toBe("ignore")
+  })
+
+  it("treats BOT_REPLY as bot/AI unless senderType is user", () => {
     expect(classifyMessage({ id: "5", createdAt: now.toISOString(), type: "BOT_REPLY" })).toBe(
-      "customer",
+      "bot",
     )
+    expect(
+      classifyMessage({
+        id: "6",
+        createdAt: now.toISOString(),
+        type: "BOT_REPLY",
+        senderType: "user",
+      }),
+    ).toBe("customer")
+  })
+
+  it("uses max createdAt per role so newest-first and oldest-first arrays agree", () => {
+    const agent = msg("agent", hoursAgo(80), "Can you share a screenshot?")
+    const customer = msg("customer", hoursAgo(10), "here you go")
+    const oldestFirst = [agent, customer]
+    const newestFirst = [customer, agent]
+
+    const a = analyzeConversation(oldestFirst, templates)
+    const b = analyzeConversation(newestFirst, templates)
+    expect(a.lastAgentAt).toEqual(hoursAgo(80))
+    expect(a.lastCustomerAt).toEqual(hoursAgo(10))
+    expect(b.lastAgentAt).toEqual(a.lastAgentAt)
+    expect(b.lastCustomerAt).toEqual(a.lastCustomerAt)
   })
 
   it("treats our bot follow-up as already-sent and does not reset the agent clock", () => {
     const cursor = analyzeConversation(
       [
         msg("agent", hoursAgo(80), "Can you share a screenshot?"),
-        msg("bot", hoursAgo(8), templates.followUpMessage),
+        msg("bot", hoursAgo(8), composeFollowUpMessage(templates.followUpMessage)),
       ],
       templates,
     )
@@ -235,11 +285,36 @@ describe("analyzeConversation + classifyMessage", () => {
     expect(cursor.lastCustomerAt).toBeUndefined()
   })
 
+  it("counts a reshaped / whitespace-only body as already sent when the mark is present", () => {
+    const reshaped = `Just checking in\n\n\ndo you have   any updates on this?\n\n${FOLLOWUP_MARK}`
+    const newestFirst = [
+      msg("bot", hoursAgo(2), reshaped),
+      msg("agent", hoursAgo(80), "ping"),
+    ]
+    const oldestFirst = [...newestFirst].reverse()
+    expect(analyzeConversation(newestFirst, templates).alreadySentFollowUp).toBe(true)
+    expect(analyzeConversation(oldestFirst, templates).alreadySentFollowUp).toBe(true)
+  })
+
+  it("honors formData noreply flags without requiring the full template text", () => {
+    const cursor = analyzeConversation([msg("agent", hoursAgo(80))], templates, {
+      [FOLLOWUP_FORM.followUpSentAt]: hoursAgo(2).toISOString(),
+    })
+    expect(cursor.alreadySentFollowUp).toBe(true)
+  })
+
+  it("does not treat an older formData flag as already-sent after a newer agent reply", () => {
+    const cursor = analyzeConversation([msg("agent", hoursAgo(2))], templates, {
+      [FOLLOWUP_FORM.followUpSentAt]: hoursAgo(80).toISOString(),
+    })
+    expect(cursor.alreadySentFollowUp).toBe(false)
+  })
+
   it("resets the already-sent flags when a human agent replies again", () => {
     const cursor = analyzeConversation(
       [
         msg("agent", hoursAgo(200), "First reply"),
-        msg("bot", hoursAgo(120), templates.followUpMessage),
+        msg("bot", hoursAgo(120), composeFollowUpMessage(templates.followUpMessage)),
         msg("agent", hoursAgo(80), "Following up myself"),
       ],
       templates,
@@ -248,11 +323,12 @@ describe("analyzeConversation + classifyMessage", () => {
     expect(cursor.alreadySentFollowUp).toBe(false)
   })
 
-  it("detects an already-sent close message so the job can skip the customer text", () => {
+  it("detects an already-sent close via mark so the job can skip the customer text", () => {
     const cursor = analyzeConversation(
-      [msg("agent", hoursAgo(130)), msg("bot", hoursAgo(1), templates.closeMessage)],
+      [msg("agent", hoursAgo(130)), msg("bot", hoursAgo(1), composeCloseMessage(templates.closeMessage))],
       templates,
     )
     expect(cursor.alreadySentClose).toBe(true)
+    expect(CLOSE_MARK).toContain("gleaptracker")
   })
 })

@@ -200,27 +200,28 @@ The Express process (the single PM2 instance) schedules a **node-cron** job — 
 | | Default |
 | --- | --- |
 | Schedule | `0 8 * * *` (08:00 every day) |
-| Timezone | `UTC` |
+| Timezone | `UTC` (override with `FOLLOWUP_TZ`, e.g. `Asia/Makassar` / WITA) |
 | First nudge | 3 days after the last **human** agent reply, if the customer has not replied since |
 | Close no-reply | 5 days after that same agent reply (matches the old Gleap 3-day / 5-day automations) |
 
 Override with env (see `.env.local.example`):
 
 - `FOLLOWUP_CRON` — cron expression, or `off` / `false` / `disabled` to skip scheduling
-- `FOLLOWUP_TZ` — IANA timezone
+- `FOLLOWUP_TZ` — IANA timezone (default `UTC`; WITA is `Asia/Makassar`)
 - `FOLLOWUP_AFTER_DAYS` / `FOLLOWUP_CLOSE_AFTER_DAYS` — thresholds
 
-The job lists `OPEN` / `INPROGRESS` **BUG** and **INQUIRY** tickets, then for each:
+The job lists each `(status, type)` pair separately (`OPEN`/`INPROGRESS` × `BUG`/`INQUIRY`) and dedupes by id (Gleap also accepts CSV filters; we do not depend on that). Then for each:
 
 1. **Skip** if the ticket has a linked tracker whose status is **not** `DONE` (OPEN and INPROGRESS trackers both count as active).
 2. **Skip** leftover parked lanes if they still appear (`On Slack`, `Waiting for Update`, snoozed). The job never writes Waiting.
 3. **Skip** when the last customer message is newer than the last human agent message, or when no human agent has replied yet (AI/bot greetings do not start the clock).
 4. Otherwise send `followUp.followUpMessage` or `followUp.closeMessage` and, at the close threshold, set the customer ticket to `DONE`.
-5. Same-day re-runs are idempotent: an already-sent follow-up / close text is not sent again.
+5. Same-day re-runs are idempotent: a stable `[gleaptracker:follow-up]` / `[gleaptracker:noreply-close]` token plus `formData.noreply_*_sent_at` flags, not a full-template string match.
+6. Immediately before send, the job re-fetches the ticket, linked tracker, and messages and re-runs the decision. If an agent just linked a tracker or the customer replied, the send is skipped.
 
-Each run logs `scanned / skipped-linked-tracker / followed-up / closed / errors`. Gleap API calls are sequential with a short delay.
+Each run logs `scanned / skipped-linked-tracker / skipped-parked / skipped-waiting-on-us / skipped-too-soon / skipped-already-acted / skipped-stale / skipped-overlap / followed-up / closed / errors`. Gleap API calls are sequential with a short delay. A second `runFollowUpJob` in the same process no-ops (`skipped-overlap`) while one is running.
 
-**PM2:** run **one** process (`instances: 1` in `ecosystem.config.cjs`). A second instance would fire the same cron twice.
+**PM2:** run **one** process (`instances: 1` in `ecosystem.config.cjs`). Multi-instance deploy is **unsupported** for this cron — both `noOverlap` and the in-process mutex are single-process only.
 
 Disable the old Gleap 3-day / 5-day automations for this support flow so customers are not double-messaged. Editing those dashboard workflows is out of band for this repo.
 
