@@ -105,11 +105,18 @@ describe("syncTrackerSlack — first link", () => {
     expect(headerText(root.blocks)).toContain("`#237650`")
     expect(headerText(root.blocks)).toContain("Tracker: Orange typo")
     expect(headerText(root.blocks)).toContain("jay@example.com")
-    expect(headerText(root.blocks)).toMatch(/Tickets:.*#237536/)
+    expect(headerText(root.blocks)).toMatch(/Ticket:.*#237536/)
+    expect(headerText(root.blocks)).not.toMatch(/Tickets:/)
     expect(headerText(root.blocks)).not.toMatch(/Fixes Gleap-/)
     expect(headerText(root.blocks)).not.toMatch(/Refs Gleap-/)
     expect(headerText(root.blocks)).not.toMatch(/Linked:/)
     expect(actionIds(root.blocks)).toEqual(["close_tracker", "open_gleap"])
+    const actions = root.blocks.find((b: KnownBlock) => b.type === "actions") as {
+      elements: Array<{ action_id: string; url?: string }>
+    }
+    expect(actions.elements.find((el) => el.action_id === "open_gleap")?.url).toBe(
+      "https://app.gleap.io/projects/test-project/bugs/cust-1",
+    )
 
     expect(mocks.postMessage.mock.calls[1][0]).toEqual({
       channel: TEST_SLACK_CHANNEL_ID,
@@ -176,10 +183,20 @@ describe("syncTrackerSlack — subsequent link", () => {
     })
     const header = headerText(updated.blocks)
     expect(header).toContain("`#237650`")
-    expect(header).toMatch(/Tickets:.*#237536.*#237537/)
+    expect(header).toMatch(
+      /Tickets: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536> <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-2\|#237537>/,
+    )
+    expect(header).not.toContain("jay@example.com")
+    expect(header).not.toContain("sam@example.com")
     expect(header).not.toMatch(/Fixes Gleap-/)
     expect(header).not.toMatch(/Refs Gleap-/)
     expect(header).not.toMatch(/Linked:/)
+    const actions = updated.blocks.find((b: KnownBlock) => b.type === "actions") as {
+      elements: Array<{ action_id: string; url?: string }>
+    }
+    expect(actions.elements.find((el) => el.action_id === "open_gleap")?.url).toBe(
+      "https://app.gleap.io/projects/test-project/for-release/tracker-1",
+    )
 
     expect(mocks.postMessage).toHaveBeenCalledTimes(1)
     const reply = mocks.postMessage.mock.calls[0][0]
