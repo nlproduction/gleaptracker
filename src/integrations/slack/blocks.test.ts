@@ -47,26 +47,34 @@ describe("header builders", () => {
     expect(header).not.toContain("tracker@example.com")
   })
 
-  it("always lists customer tickets as Tickets: links and never Fixes/Refs", () => {
+  it("lists a single customer as Ticket: and keeps email off the tickets line", () => {
+    const solo = buildHeaderText({ tracker, primary, extras: [] })
+    expect(solo).toMatch(
+      /Ticket: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536>/,
+    )
+    expect(solo).not.toMatch(/Tickets:/)
+    expect(solo).toContain("jay@example.com")
+    expect(solo).not.toContain("#237537")
+    expect(solo).not.toMatch(/Fixes Gleap-/)
+    expect(solo).not.toMatch(/Refs Gleap-/)
+    expect(solo).not.toMatch(/Linked:/)
+  })
+
+  it("lists multiple customers as space-separated Tickets: with no emails", () => {
     const withExtras = buildHeaderText({
       tracker,
       primary,
       extras: [extra],
     })
     expect(withExtras).toMatch(
-      /Tickets: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536>, <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-2\|#237537>/,
+      /Tickets: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536> <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-2\|#237537>/,
     )
+    expect(withExtras).not.toMatch(/(^|\n)Ticket: /)
+    expect(withExtras).not.toContain("jay@example.com")
+    expect(withExtras).not.toContain("sam@example.com")
     expect(withExtras).not.toMatch(/Fixes Gleap-/)
     expect(withExtras).not.toMatch(/Refs Gleap-/)
     expect(withExtras).not.toMatch(/Linked:/)
-
-    const solo = buildHeaderText({ tracker, primary, extras: [] })
-    expect(solo).toMatch(
-      /Tickets: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536>/,
-    )
-    expect(solo).not.toContain("#237537")
-    expect(solo).not.toMatch(/Fixes Gleap-/)
-    expect(solo).not.toMatch(/Refs Gleap-/)
   })
 
   it("renders tracker status as emoji + text, not as a button", () => {
@@ -138,7 +146,31 @@ describe("action row / root blocks", () => {
     })
   })
 
-  it("builds root blocks from the tracker header and the closed-state action row", () => {
+  it("points Open in Gleap at the customer ticket when there is exactly one", () => {
+    const tracker = trackerTicket({ status: "INPROGRESS" })
+    const primary = customerTicket()
+    const blocks = buildTrackerRootBlocks({
+      tracker,
+      primary,
+      extras: [],
+    })
+
+    const header = headerFromRoot(blocks)
+    expect(header).toMatch(
+      /Ticket: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536>/,
+    )
+    expect(header).toContain("jay@example.com")
+    expect(header).not.toMatch(/Tickets:/)
+
+    const actions = blocks[1] as { elements: Array<Record<string, unknown>> }
+    expect(actionIds(actions)).toEqual(["close_tracker", "open_gleap"])
+    expect(actions.elements[1]).toMatchObject({
+      action_id: "open_gleap",
+      url: "https://app.gleap.io/projects/test-project/bugs/cust-1",
+    })
+  })
+
+  it("points Open in Gleap at the tracker when there are multiple customers", () => {
     const tracker = trackerTicket({ status: "DONE" })
     const primary = customerTicket()
     const extras = [extraCustomerTicket()]
@@ -152,7 +184,8 @@ describe("action row / root blocks", () => {
     const header = headerFromRoot(blocks)
     expect(header).toContain("`#237650`")
     expect(header).toContain("Tracker: Orange typo")
-    expect(header).toContain("jay@example.com")
+    expect(header).not.toContain("jay@example.com")
+    expect(header).not.toContain("sam@example.com")
     expect(header).toMatch(/Tickets:.*#237536.*#237537/)
     expect(header).toContain("✅ Closed")
     expect(header).not.toMatch(/Fixes Gleap-/)

@@ -25,10 +25,11 @@ GleapTracker detects the tracker (or the new link) and:
 If the tracker has no Slack thread yet:
   1. Post a Slack root card:
        `#<trackerBugId>`  *tracker title*
-       <primary customer email>
-       Tickets: #<cust1>, #<cust2>   ← always; mrkdwn links to each customer ticket
+       <primary customer email>      ← single customer ticket only
+       Ticket: #<cust>               ← one linked customer
+       Tickets: #<cust1> #<cust2>    ← two or more; no emails in the body
        🟡 In progress                ← text/emoji for TRACKER status (not a button)
-       [Close]  [Open in Gleap ↗]    ← Open in Gleap is the TRACKER ticket
+       [Close]  [Open in Gleap ↗]    ← one customer → that ticket; two+ → tracker
      Close is hidden when the tracker is already DONE.
      `Fixes Gleap-…` / `Refs Gleap-…` are **not** shown on Slack (git only).
   2. First in-thread message = tracker ticket description
@@ -37,7 +38,7 @@ If the tracker has no Slack thread yet:
          │
          ▼
 If another customer ticket is linked to the same tracker:
-  • Refresh the Slack root (Tickets:, status, Close visibility)
+  • Refresh the Slack root (Ticket(s):, status, Close visibility, Open in Gleap target)
   • Post in the thread:
         *New related ticket*
         #<bugId> <title>
@@ -246,7 +247,7 @@ Add these custom text fields on the tracker board so Slack state survives (the B
 | --------------------- | ---------------------------------------------------- |
 | `slack_thread`        | Permalink to the Slack root message                  |
 | `slack_thread_ts`     | Slack thread timestamp                               |
-| `primary_ticket_id`   | Original customer ticket (email + first Tickets: link) |
+| `primary_ticket_id`   | Original customer ticket (single-ticket email + first Ticket(s): link) |
 | `slack_notified_ids`  | Customer ticket IDs already announced in the thread  |
 | `close_processed`     | Dedup flag so DONE webhooks do not re-notify         |
 | `close_silent`        | Set when Slack Close was submitted with empty text   |

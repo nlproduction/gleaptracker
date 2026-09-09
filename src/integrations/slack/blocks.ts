@@ -45,8 +45,12 @@ export const buildHeaderText = (opts: {
   const statusLabel = closed ? undefined : tracker.statusLabel
 
   const lines = [`\`#${tracker.bugId}\`  *${tracker.title}*`, ""]
-  if (email) lines.push(email)
-  lines.push(`Tickets: ${customers.map(customerTicketLink).join(", ")}`)
+  if (customers.length === 1) {
+    if (email) lines.push(email)
+    lines.push(`Ticket: ${customerTicketLink(primary)}`)
+  } else {
+    lines.push(`Tickets: ${customers.map(customerTicketLink).join(" ")}`)
+  }
   lines.push("")
   lines.push(trackerStatusBadge(status, statusLabel))
 
@@ -95,6 +99,8 @@ export const buildTrackerRootBlocks = (opts: {
   closed?: boolean
 }): KnownBlock[] => {
   const closed = opts.closed ?? opts.tracker.status === config.gleap.doneStatus
+  const customers = [opts.primary, ...opts.extras]
+  const openTarget = customers.length === 1 ? customers[0] : opts.tracker
   return [
     {
       type: "section",
@@ -111,7 +117,7 @@ export const buildTrackerRootBlocks = (opts: {
     },
     buildActionsBlock({
       trackerId: opts.tracker.id,
-      gleapUrl: getGleapTicketUrl(opts.tracker.id, opts.tracker.type),
+      gleapUrl: getGleapTicketUrl(openTarget.id, openTarget.type),
       closed,
     }) as unknown as KnownBlock,
   ]
