@@ -14,6 +14,6 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts", "gleaptracker.ts"],
+  "include": ["src/**/*.ts", "gleaptracker.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

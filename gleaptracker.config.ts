@@ -16,13 +16,13 @@ const config: GleapTrackerConfig = {
     projectId: process.env.GLEAP_PROJECT_ID!,
     /** Ticket type for "for release" tracker tickets */
     trackerTicketType: "FOR-RELEASE",
-    /** Type applied to tickets when they are rejected by the dev team */
+    /** Legacy: type applied when Slack Reject was used (unused in the tracker-SoT flow) */
     inProgressType: "INPROGRESS",
     /** Status value Gleap uses for closed/done tickets */
     doneStatus: "DONE",
 
     /** SEE README.md on how to get custom status IDs from Gleap */
-    /** CUSTOM status IDs that trigger sending the ticket to the Slack channel */
+    /** CUSTOM status IDs treated as parked / on-hold when applying waitingStatus */
     onSlackStatuses: { BUG: "cz2qz", INQUIRY: "lm7lx3" },
     /** CUSTOM status values applied to linked customer tickets while fix is pending */
     waitingStatus: "9oyq7h",
@@ -48,9 +48,17 @@ We're closing the ticket. Feel free to reply to reopen it if the issue persists.
 
   // -------------------------------------------------------------------------
   // Issue tracker selection
-  // "linear" | "jira" | "both"
+  // "none" (tracker-SoT; no Linear/Jira create) | "linear" | "jira" | "both"
   // -------------------------------------------------------------------------
-  issueTracker: "linear",
+  issueTracker: "none",
+
+  // -------------------------------------------------------------------------
+  // GitHub (Fixes Gleap-<trackerBugId> on push)
+  // -------------------------------------------------------------------------
+  github: {
+    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || "",
+    closeBranches: ["master"],
+  },
 
   // -------------------------------------------------------------------------
   // Linear (required when issueTracker is "linear" or "both")

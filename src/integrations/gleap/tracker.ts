@@ -118,6 +118,11 @@ export const processTrackerTicket = async (ticket: GleapTrackerTicket): Promise<
     const useLinear = cfg.issueTracker === "linear" || cfg.issueTracker === "both"
     const useJira = cfg.issueTracker === "jira" || cfg.issueTracker === "both"
 
+    if (!useLinear && !useJira) {
+      console.log(`[Tracker] issueTracker is "${cfg.issueTracker}" — not creating Linear/Jira issues`)
+      return
+    }
+
     let linearResult: Awaited<ReturnType<typeof createLinearIssue>> | undefined
     let jiraResult: Awaited<ReturnType<typeof createJiraIssue>> | undefined
 

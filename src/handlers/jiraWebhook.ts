@@ -1,6 +1,7 @@
 import type { Request, Response } from "express"
 import config from "../../gleaptracker.config"
-import { getGleapClient } from "../integrations/gleap/client"
+import { closeTracker } from "../integrations/gleap/close"
+import { findTrackerByBugId } from "../integrations/gleap/linked"
 
 const recentlyProcessed = new Set<string>()
 const DEDUP_TTL_MS = 30_000
@@ -34,12 +35,16 @@ interface JiraIssueWebhookPayload {
 
 const verifySecret = (req: Request): boolean => {
   const secret = (req.query.secret as string) || ""
-  return secret === (config.jira!.webhookSecret || "")
+  return secret === (config.jira?.webhookSecret || "")
 }
 
 const processJiraIssueUpdate = async (payload: JiraIssueWebhookPayload) => {
   const { issue, changelog } = payload
-  const cfg = config.jira!
+  const cfg = config.jira
+  if (!cfg) {
+    console.log("[Jira] No Jira config — skipping")
+    return
+  }
 
   const statusChange = changelog?.items.find((item) => item.field === "status")
   if (!statusChange) {
@@ -56,7 +61,7 @@ const processJiraIssueUpdate = async (payload: JiraIssueWebhookPayload) => {
 
   const bugIdMatch = issue.fields.summary?.match(/^\[(\d+)\]/)
   if (!bugIdMatch) {
-    console.warn(
+    console.error(
       `[Jira] Issue ${issue.key} skipped — summary has no leading [bugId]: "${issue.fields.summary}"`,
     )
     return
@@ -73,39 +78,13 @@ const processJiraIssueUpdate = async (payload: JiraIssueWebhookPayload) => {
 
   console.log(`[Jira] Processing done issue ${issue.key}, Gleap bugId: ${bugId}`)
 
-  const gleap = getGleapClient()
-  const { tickets } = await gleap.tickets.list({ bugId })
-
-  const ticket = tickets[0]
-  if (!ticket) {
-    console.warn(`[Jira] No Gleap ticket found for bugId ${bugId}`)
+  const tracker = await findTrackerByBugId(bugId)
+  if (!tracker) {
+    console.error(`[Jira] No Gleap tracker ticket found for bugId ${bugId}`)
     return
   }
 
-  const linkedTickets = (ticket.linkedTickets ?? []) as string[]
-  if (linkedTickets.length) {
-    if (config.gleap.workflowId) {
-      await Promise.all(
-        linkedTickets.map(async (id) => {
-          const ok = await gleap.tickets.runWorkflow(id, config.gleap.workflowId!)
-          if (ok) console.log(`[Jira] Workflow applied to Gleap ticket ${id} ✓`)
-        }),
-      )
-    } else if (config.gleap.bugFixedMessage) {
-      const msg = config.gleap.bugFixedMessage
-      await Promise.all(
-        linkedTickets.map(async (id) => {
-          const ok = await gleap.messages.sendMessage(id, msg)
-          if (ok) console.log(`[Jira] Bug-fixed message sent to Gleap ticket ${id} ✓`)
-        }),
-      )
-    } else {
-      console.warn("[Jira] No workflowId or bugFixedMessage configured — skipping customer notification")
-    }
-  }
-
-  const ok = await gleap.tickets.update(ticket.id, { status: config.gleap.doneStatus })
-  if (ok) console.log(`[Jira] Tracker ticket ${ticket.id} marked as DONE ✓`)
+  await closeTracker(tracker, { source: "jira" })
 }
 
 export function jiraOptions(_req: Request, res: Response): void {
