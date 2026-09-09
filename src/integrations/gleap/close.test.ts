@@ -116,6 +116,60 @@ describe("closeTracker", () => {
     expect(mocks.markTrackerSlackClosed).toHaveBeenCalledTimes(1)
   })
 
+  it("gleap-sourced close is silent — no customer messages, still DONE + Slack", async () => {
+    const tracker = trackerTicket()
+    mocks.loadTicket.mockResolvedValue(tracker)
+
+    await closeTracker(tracker, { source: "gleap" })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
+    expect(mocks.update).toHaveBeenCalledWith(
+      "tracker-1",
+      expect.objectContaining({
+        formData: expect.objectContaining({
+          close_processed: "true",
+          close_silent: "true",
+        }),
+      }),
+    )
+    expect(mocks.update).toHaveBeenCalledWith("tracker-1", {
+      status: config.gleap.doneStatus,
+    })
+    expect(mocks.markTrackerSlackClosed).toHaveBeenCalledTimes(1)
+  })
+
+  it("github-sourced close notifies linked customers via bugFixedMessage", async () => {
+    const tracker = trackerTicket()
+    mocks.loadTicket.mockResolvedValue(tracker)
+
+    await closeTracker(tracker, { source: "github" })
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.sendMessage).toHaveBeenCalledWith(
+      "cust-1",
+      config.gleap.bugFixedMessage,
+    )
+    expect(mocks.sendMessage).toHaveBeenCalledWith(
+      "cust-2",
+      config.gleap.bugFixedMessage,
+    )
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
+    expect(mocks.update).toHaveBeenCalledWith(
+      "tracker-1",
+      expect.objectContaining({
+        formData: expect.objectContaining({
+          close_processed: "true",
+          close_silent: "false",
+        }),
+      }),
+    )
+    expect(mocks.update).toHaveBeenCalledWith("tracker-1", {
+      status: config.gleap.doneStatus,
+    })
+    expect(mocks.markTrackerSlackClosed).toHaveBeenCalledTimes(1)
+  })
+
   it("is idempotent when the tracker is already DONE and close_processed", async () => {
     const tracker = trackerTicket({
       status: "DONE",

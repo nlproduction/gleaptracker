@@ -13,7 +13,7 @@ const corsHeaders = {
 
 const handleTrackerEvent = async (ticket: GleapWebhookTicket): Promise<void> => {
   if (isTrackerDone(ticket)) {
-    await closeTracker(ticket, { source: "gleap" })
+    await closeTracker(ticket, { silent: true, source: "gleap" })
     return
   }
   await syncTrackerSlack(ticket)

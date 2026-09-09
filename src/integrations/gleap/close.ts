@@ -70,7 +70,10 @@ export const closeTracker = async (
     return
   }
 
-  const silent = Boolean(opts.silent || state.closeSilent)
+  // Manual DONE in the Gleap UI must not fan out bugFixedMessage / workflow.
+  const silent = Boolean(
+    opts.silent || state.closeSilent || opts.source === "gleap",
+  )
   const customers = await loadCustomerTickets(tracker)
   const customerIds = customers.length ? customers.map((c) => c.id) : linkedIds(tracker)
 
