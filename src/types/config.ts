@@ -17,6 +17,21 @@ export interface GleapConfig {
   bugFixedMessage?: string;
 }
 
+export interface FollowUpConfig {
+  /** node-cron expression; default `0 8 * * *` (08:00 every day). Set `off` to disable. */
+  cron: string;
+  /** IANA timezone for the cron expression (default UTC) */
+  timezone: string;
+  /** Days after the last human agent reply with no customer reply before the first nudge */
+  followUpAfterDays: number;
+  /** Days after the last human agent reply with no customer reply before close-no-reply */
+  closeAfterDays: number;
+  /** Customer-visible 3-day (or configured) follow-up text */
+  followUpMessage: string;
+  /** Customer-visible close-no-reply text (sent immediately before DONE) */
+  closeMessage: string;
+}
+
 export interface SlackConfig {
   /** Slack channel ID where ticket threads are created */
   channelId: string;
@@ -67,4 +82,6 @@ export interface GleapTrackerConfig {
   linear?: LinearConfig;
   jira?: JiraConfig;
   github?: GitHubConfig;
+  /** Daily no-reply follow-up / close job (node-cron, same PM2 process) */
+  followUp: FollowUpConfig;
 }

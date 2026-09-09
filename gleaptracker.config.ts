@@ -40,6 +40,22 @@ We're closing the ticket. Feel free to reply to reopen it if the issue persists.
   },
 
   // -------------------------------------------------------------------------
+  // Daily no-reply follow-up / close (node-cron in the Express/PM2 process)
+  // Replaces Gleap-native 3-day / 5-day workflows so linked trackers can be
+  // checked. Default schedule: 08:00 UTC. Set FOLLOWUP_CRON=off to disable.
+  // -------------------------------------------------------------------------
+  followUp: {
+    cron: process.env.FOLLOWUP_CRON || "0 8 * * *",
+    timezone: process.env.FOLLOWUP_TZ || "UTC",
+    followUpAfterDays: Number(process.env.FOLLOWUP_AFTER_DAYS) || 3,
+    closeAfterDays: Number(process.env.FOLLOWUP_CLOSE_AFTER_DAYS) || 5,
+    followUpMessage: `Just checking in — do you have any updates on this?
+
+If we don't hear back, we'll close the ticket. Reply anytime and we'll pick it up.`,
+    closeMessage: `Since we haven't heard back, we're closing this ticket. Feel free to reply to reopen it if you still need help. If you have any other questions, please open a new ticket 🙂`,
+  },
+
+  // -------------------------------------------------------------------------
   // Slack
   // -------------------------------------------------------------------------
   slack: {
