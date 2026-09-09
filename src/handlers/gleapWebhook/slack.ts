@@ -22,7 +22,23 @@ import type { GleapTicket } from "../../integrations/gleap/client"
 const SLACK_CHANNEL_ID = config.slack.channelId
 
 const slackCreating = new Set<string>()
+const reopenAnnounced = new Set<string>()
 const SLACK_DEDUP_TTL_MS = 30_000
+/** Dual Gleap ticket.updated webhooks for one reopen arrive ~250ms apart. */
+const REOPEN_DEDUP_MS = 3_000
+
+const claimReopenAnnounce = (trackerId: string): boolean => {
+  if (reopenAnnounced.has(trackerId)) return false
+  reopenAnnounced.add(trackerId)
+  setTimeout(() => reopenAnnounced.delete(trackerId), REOPEN_DEDUP_MS)
+  return true
+}
+
+/** Test-only: in-memory create/reopen locks survive across cases otherwise. */
+export const resetSlackSyncDedupForTests = (): void => {
+  slackCreating.clear()
+  reopenAnnounced.clear()
+}
 
 const withCreateDedup = async (
   trackerId: string,
@@ -182,10 +198,16 @@ export const syncTrackerSlack = async (
   }
 
   if (state.closeProcessed && !isTrackerDone(tracker)) {
-    formPatch[TRACKER_FORM.closeProcessed] = "false"
-    formPatch[TRACKER_FORM.closeSilent] = "false"
-    await postInTrackerThread(state.slackThreadTs, "🔄 Reopened")
-    console.log(`[Gleap] Tracker ${tracker.id} reopened — Slack thread updated ✓`)
+    if (!claimReopenAnnounce(tracker.id)) {
+      console.log(
+        `[Gleap] Tracker ${tracker.id} reopen already announced — skipping duplicate Slack update`,
+      )
+    } else {
+      formPatch[TRACKER_FORM.closeProcessed] = "false"
+      formPatch[TRACKER_FORM.closeSilent] = "false"
+      await postInTrackerThread(state.slackThreadTs, "🔄 Reopened")
+      console.log(`[Gleap] Tracker ${tracker.id} reopened — Slack thread updated ✓`)
+    }
   }
 
   if (Object.keys(formPatch).length) {
@@ -194,6 +216,7 @@ export const syncTrackerSlack = async (
 }
 
 export const markTrackerSlackClosed = async (tracker: GleapTicket): Promise<void> => {
+  reopenAnnounced.delete(tracker.id)
   const state = readTrackerForm(tracker.formData)
   if (!state.slackThreadTs) return
 

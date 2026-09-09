@@ -115,6 +115,7 @@ describe("action row / root blocks", () => {
       closed: false,
     })
     expect(actionIds(open)).toEqual(["close_tracker", "open_gleap"])
+    expect(open.block_id).toBe("tracker_actions")
     expect(open.elements[0]).toMatchObject({
       action_id: "close_tracker",
       style: "danger",

@@ -10,6 +10,9 @@ import { buildCloseModalView } from "../integrations/slack/blocks"
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || ""
 const SLACK_CHANNEL_ID = config.slack.channelId
 
+/** Close plus the pre-redesign first-button id Slack may still dispatch. */
+const CLOSE_ACTION_IDS = new Set(["close_tracker", "tracker_status"])
+
 const verifySlackSignature = (
   signature: string,
   timestamp: string,
@@ -69,6 +72,10 @@ const openCloseModal = async (
 ) => {
   const slack = getSlackClient()
   const metadata: ModalMetadata = { gleapTicketId, ...ctx }
+  if (!triggerId) {
+    console.error("[Slack] views.open (close) skipped — missing trigger_id")
+    return
+  }
   const res = await slack.views.open({
     trigger_id: triggerId,
     view: buildCloseModalView({
@@ -76,7 +83,43 @@ const openCloseModal = async (
       initialMessage: config.gleap.bugFixedMessage ?? "",
     }),
   })
-  if (!res.ok) console.error(`[Slack] views.open (close) failed: ${res.error}`)
+  if (!res.ok) {
+    console.error(
+      `[Slack] views.open (close) failed: ${res.error}`,
+      res.response_metadata ?? "",
+    )
+    return
+  }
+  console.log(`[Slack] views.open (close) opened for tracker ${gleapTicketId}`)
+}
+
+const isInteractionType = (
+  type: unknown,
+): type is "block_actions" | "view_submission" =>
+  type === "block_actions" || type === "view_submission"
+
+const parseInteractionPayload = (
+  rawBody: string,
+  jsonBody: Record<string, unknown> | null,
+): Record<string, unknown> | null => {
+  if (jsonBody && isInteractionType(jsonBody.type)) return jsonBody
+  const raw = new URLSearchParams(rawBody).get("payload")
+  if (!raw) return null
+  return JSON.parse(raw) as Record<string, unknown>
+}
+
+const actionContext = (payload: Record<string, unknown>): SlackActionContext => {
+  const container = payload.container as
+    | { channel_id?: string; message_ts?: string }
+    | undefined
+  const channel = payload.channel as { id?: string } | undefined
+  const message = payload.message as { ts?: string } | undefined
+  const user = payload.user as { id?: string } | undefined
+  return {
+    channelId: channel?.id || container?.channel_id || "",
+    threadTs: message?.ts || container?.message_ts || "",
+    userId: user?.id || "",
+  }
 }
 
 function rawBodyToString(body: unknown): string {
@@ -145,14 +188,17 @@ export async function slackPost(req: Request, res: Response): Promise<void> {
     }
   }
 
-  const params = new URLSearchParams(rawBody)
-
   try {
-    let payload: Record<string, unknown>
+    let payload: Record<string, unknown> | null
     try {
-      payload = JSON.parse(params.get("payload") || "{}")
+      payload = parseInteractionPayload(rawBody, jsonBody)
     } catch {
       res.status(400).send("Invalid payload")
+      return
+    }
+
+    if (!payload) {
+      res.status(200).end()
       return
     }
 
@@ -162,17 +208,20 @@ export async function slackPost(req: Request, res: Response): Promise<void> {
         | undefined
       const action = actions?.[0]
       const triggerId = payload.trigger_id as string
-      const channelId = (payload.channel as { id: string }).id
-      const threadTs = (payload.message as { ts: string }).ts
-      const userId = (payload.user as { id: string }).id
-      const ctx: SlackActionContext = { channelId, threadTs, userId }
+      const ctx = actionContext(payload)
+
+      console.log(
+        `[Slack] block_actions action_id=${action?.action_id ?? "(none)"}`,
+      )
 
       const gleapTicketId =
         action?.value ||
-        (await getGleapTicketIdFromThread(channelId, threadTs)) ||
+        (ctx.channelId && ctx.threadTs
+          ? await getGleapTicketIdFromThread(ctx.channelId, ctx.threadTs)
+          : null) ||
         ""
 
-      if (action?.action_id === "close_tracker") {
+      if (action?.action_id && CLOSE_ACTION_IDS.has(action.action_id)) {
         await openCloseModal(triggerId, gleapTicketId, ctx)
         res.status(200).end()
         return
