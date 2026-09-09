@@ -32,7 +32,7 @@ src/
 - Prefer `void asyncFn()` over floating promises when fire-and-forget is intentional.
 - **The tracker ticket owns the Slack thread** (`formData.slack_thread` / `slack_thread_ts`). Do not store the thread only on the customer ticket.
 - Shared close path: `closeTracker()` in `src/integrations/gleap/close.ts` (notify linked customers → DONE tracker → Slack header). Children are not status-updated in code; Gleap closes them when the tracker is DONE.
-- Commit convention in Slack headers: `Fixes Gleap-<trackerBugId>` and `Refs Gleap-<customerBugId>, …`.
+- Commit convention (git only, not Slack): `Fixes Gleap-<trackerBugId>` and `Refs Gleap-<customerBugId>, …`.
 
 ## Commands
 

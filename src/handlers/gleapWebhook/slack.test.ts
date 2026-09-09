@@ -91,18 +91,21 @@ describe("syncTrackerSlack — first link", () => {
     const root = mocks.postMessage.mock.calls[0][0]
     expect(root).toMatchObject({
       channel: TEST_SLACK_CHANNEL_ID,
-      text: `#${primary.bugId} ${primary.title}`,
+      text: `#${tracker.bugId} ${tracker.title}`,
       metadata: {
         event_type: "gleap_ticket",
         event_payload: { gleap_ticket_id: tracker.id },
       },
     })
     expect(root.thread_ts).toBeUndefined()
-    expect(headerText(root.blocks)).toContain("`#237536`")
-    expect(headerText(root.blocks)).toContain("`Fixes Gleap-237650`")
-    expect(headerText(root.blocks)).toContain("`Refs Gleap-237536`")
+    expect(headerText(root.blocks)).toContain("`#237650`")
+    expect(headerText(root.blocks)).toContain("Tracker: Orange typo")
+    expect(headerText(root.blocks)).toContain("jay@example.com")
+    expect(headerText(root.blocks)).toMatch(/Tickets:.*#237536/)
+    expect(headerText(root.blocks)).not.toMatch(/Fixes Gleap-/)
+    expect(headerText(root.blocks)).not.toMatch(/Refs Gleap-/)
     expect(headerText(root.blocks)).not.toMatch(/Linked:/)
-    expect(actionIds(root.blocks)).toContain("close_tracker")
+    expect(actionIds(root.blocks)).toEqual(["close_tracker", "open_gleap"])
 
     expect(mocks.postMessage.mock.calls[1][0]).toEqual({
       channel: TEST_SLACK_CHANNEL_ID,
@@ -157,7 +160,7 @@ describe("syncTrackerSlack — subsequent link", () => {
     mocks.ticketUpdate.mockResolvedValue(true)
   })
 
-  it("refreshes Refs/Linked on the root and posts a New related ticket reply", async () => {
+  it("refreshes Tickets: on the root and posts a New related ticket reply", async () => {
     await syncTrackerSlack(tracker, { triggerTicketId: extra.id })
 
     expect(mocks.update).toHaveBeenCalledTimes(1)
@@ -165,12 +168,14 @@ describe("syncTrackerSlack — subsequent link", () => {
     expect(updated).toMatchObject({
       channel: TEST_SLACK_CHANNEL_ID,
       ts: TEST_THREAD_TS,
-      text: `#${primary.bugId} ${primary.title}`,
+      text: `#${tracker.bugId} ${tracker.title}`,
     })
     const header = headerText(updated.blocks)
-    expect(header).toContain("`Fixes Gleap-237650`")
-    expect(header).toContain("`Refs Gleap-237536, Gleap-237537`")
-    expect(header).toMatch(/Linked:.*#237537/)
+    expect(header).toContain("`#237650`")
+    expect(header).toMatch(/Tickets:.*#237536.*#237537/)
+    expect(header).not.toMatch(/Fixes Gleap-/)
+    expect(header).not.toMatch(/Refs Gleap-/)
+    expect(header).not.toMatch(/Linked:/)
 
     expect(mocks.postMessage).toHaveBeenCalledTimes(1)
     const reply = mocks.postMessage.mock.calls[0][0]
@@ -231,11 +236,9 @@ describe("markTrackerSlackClosed", () => {
     await markTrackerSlackClosed(tracker)
 
     const updated = mocks.update.mock.calls[0][0]
-    expect(actionIds(updated.blocks)).not.toContain("close_tracker")
-    expect(updated.blocks[1].elements[0]).toMatchObject({
-      action_id: "tracker_status",
-      text: { text: "✅ Closed" },
-    })
+    expect(actionIds(updated.blocks)).toEqual(["open_gleap"])
+    expect(headerText(updated.blocks)).toContain("✅ Closed")
+    expect(JSON.stringify(updated.blocks)).not.toContain("tracker_status")
     expect(mocks.postMessage).toHaveBeenCalledWith({
       channel: TEST_SLACK_CHANNEL_ID,
       thread_ts: TEST_THREAD_TS,

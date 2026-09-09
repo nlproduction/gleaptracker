@@ -23,25 +23,21 @@ GleapTracker detects the tracker (or the new link) and:
          │
          ▼
 If the tracker has no Slack thread yet:
-  1. Post a Slack root card in the same overall format as before:
-       `#<customerBugId>`  *customer title*
-       Customer name / email
-       Linked: #…, #…          ← only extra customer tickets (deep links)
-       `Fixes Gleap-<trackerBugId>`
-       `Refs Gleap-<customerBugId1>, Gleap-<customerBugId2>, …`
-       [tracker status] [Close] [Open in Gleap ↗]
-     Header identity (bugId / title / email) comes from the **original
-     customer ticket**, not the tracker.
-     Refs always lists every linked customer bugId.
-     Fixes is only the tracker bugId.
+  1. Post a Slack root card:
+       `#<trackerBugId>`  *tracker title*
+       <primary customer email>
+       Tickets: #<cust1>, #<cust2>   ← always; mrkdwn links to each customer ticket
+       🟡 In progress                ← text/emoji for TRACKER status (not a button)
+       [Close]  [Open in Gleap ↗]    ← Open in Gleap is the TRACKER ticket
      Close is hidden when the tracker is already DONE.
+     `Fixes Gleap-…` / `Refs Gleap-…` are **not** shown on Slack (git only).
   2. First in-thread message = tracker ticket description
      (Gleap-generated tracker description).
   3. Persist slack_thread / slack_thread_ts on the **tracker**.
          │
          ▼
 If another customer ticket is linked to the same tracker:
-  • Refresh the Slack root (Refs, Linked, status, Close visibility)
+  • Refresh the Slack root (Tickets:, status, Close visibility)
   • Post in the thread:
         *New related ticket*
         #<bugId> <title>
@@ -49,7 +45,7 @@ If another customer ticket is linked to the same tracker:
         [Open in Gleap]
          │
          ▼
-Developers copy Fixes / Refs into commit messages and work as usual.
+Developers use the commit convention below and work as usual.
          │
          ▼
 Close the tracker via any of three paths (same pipeline):
@@ -76,7 +72,7 @@ and posts 🔄 Reopened.
 
 ### Commit convention
 
-Copy the system lines from the Slack header into the fixing commit:
+Use these tokens in the fixing commit (they are **not** rendered on the Slack card):
 
 ```
 Fixes Gleap-237650
@@ -84,7 +80,7 @@ Refs Gleap-237536, Gleap-237537
 ```
 
 - **`Fixes Gleap-<id>`** — tracker bugId only. A push to `master` that contains this token closes that tracker (path B).
-- **`Refs Gleap-<id>, …`** — all linked **customer** bugIds. Always present on the Slack card. Optional in the commit; not used to close anything.
+- **`Refs Gleap-<id>, …`** — all linked **customer** bugIds. Optional in the commit; not used to close anything.
 
 ### Slack Close modal (path C)
 
@@ -250,7 +246,7 @@ Add these custom text fields on the tracker board so Slack state survives (the B
 | --------------------- | ---------------------------------------------------- |
 | `slack_thread`        | Permalink to the Slack root message                  |
 | `slack_thread_ts`     | Slack thread timestamp                               |
-| `primary_ticket_id`   | Original customer ticket shown in the header         |
+| `primary_ticket_id`   | Original customer ticket (email + first Tickets: link) |
 | `slack_notified_ids`  | Customer ticket IDs already announced in the thread  |
 | `close_processed`     | Dedup flag so DONE webhooks do not re-notify         |
 | `close_silent`        | Set when Slack Close was submitted with empty text   |
