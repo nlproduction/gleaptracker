@@ -110,6 +110,10 @@ describe("runFollowUpJob", () => {
       closed: 1,
       errors: 0,
     })
+    expect(mocks.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: config.gleap.waitingStatus }),
+    )
   })
 
   it("is safe to re-run the same day — does not send a second follow-up", async () => {

@@ -143,8 +143,8 @@ Edit `gleaptracker.config.ts` in the project root. This file controls all non-se
 | `gleap.workflowId`        | _(optional)_ Gleap workflow ID run on each linked **customer** ticket when the tracker is closed without a custom Slack message — use this **or** `bugFixedMessage`, not both |
 | `gleap.bugFixedMessage`   | _(optional)_ Default customer message (also the Slack Close modal prefill). Used when `workflowId` is not set and the close is not silent |
 | `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)                                                                               |
-| `gleap.onSlackStatuses`   | Parked / on-hold status IDs, keyed by ticket type. Newly linked customers in these (or OPEN / INPROGRESS) get `waitingStatus`      |
-| `gleap.waitingStatus`     | Status applied to newly linked customer tickets while the fix is pending                                                             |
+| `gleap.onSlackStatuses`   | Legacy "On Slack" lane IDs (not applied on Link to tracker; cron may still ignore leftover tickets in these lanes)                 |
+| `gleap.waitingStatus`     | Legacy "Waiting for Update" ID — **not** applied after link / Slack sync. Newly linked `OPEN` customers go to `INPROGRESS`         |
 | `issueTracker`            | `"none"` (default tracker-SoT path; no Linear/Jira create) \| `"linear"` \| `"jira"` \| `"both"`                                     |
 | `github.closeBranches`    | Branches whose pushes close trackers via `Fixes Gleap-<trackerBugId>` (default: `["master"]`)                                        |
 | `followUp.cron`           | node-cron expression for the daily no-reply job (default `0 8 * * *`, or `FOLLOWUP_CRON`; set `off` to disable)                      |
@@ -174,9 +174,9 @@ Fields that need these IDs:
 
 | Field                 | What it maps to in Gleap                          |
 | --------------------- | ------------------------------------------------- |
-| `gleap.onSlackStatuses.BUG` | Parked / on-hold status for Bug tickets (e.g. "On Slack") |
-| `gleap.onSlackStatuses.INQUIRY` | Parked / on-hold status for Inquiry tickets |
-| `gleap.waitingStatus` | Your "Waiting for Update" status                  |
+| `gleap.onSlackStatuses.BUG` | Legacy "On Slack" lane for Bug tickets |
+| `gleap.onSlackStatuses.INQUIRY` | Legacy "On Slack" lane for Inquiry tickets |
+| `gleap.waitingStatus` | Legacy "Waiting for Update" (no longer applied on link) |
 | `gleap.doneStatus`    | Your "Done / Closed" status (often just `"DONE"`) |
 
 ### 4. Gleap workspace setup
@@ -185,15 +185,9 @@ Before the integration can work, a few things need to be configured in Gleap its
 
 #### Custom ticket statuses
 
-Go to **Gleap → Bugs → Settings** and create two custom statuses:
+**Waiting for Update is legacy.** After **Link to tracker** (and when a new related ticket is announced in Slack), gleaptracker only changes customer status when it is `OPEN` — it sets `INPROGRESS`. Already-`INPROGRESS` tickets and any other lane (On Slack, Waiting, Done, …) are left as-is. This path never writes Waiting for Update or On Slack.
 
-| Purpose                                     | Suggested name                  | Used in config        |
-| ------------------------------------------- | ------------------------------- | --------------------- |
-| Customer ticket parked / on hold (BUG)      | "On Slack" (any name) | `gleap.onSlackStatuses.BUG`     |
-| Customer ticket parked / on hold (INQUIRY)  | "On Slack" (any name) | `gleap.onSlackStatuses.INQUIRY` |
-| Linked to a tracker, fix in progress        | "Waiting for Update" (any name) | `gleap.waitingStatus` |
-
-These must be **custom** statuses (not the built-in ones). Tickets sitting in "On Slack" or "Waiting for Update" are still ignored by gleaptracker's daily no-reply job (see below), so they will not be auto-nudged or auto-closed while parked.
+Older "On Slack" / "Waiting for Update" custom lanes may still exist in Gleap. They are no longer required for the tracker-SoT flow. If leftover tickets sit in those lanes, the daily no-reply job ignores them; the **primary** skip is a linked tracker that is not `DONE`.
 
 See [Finding Gleap status IDs](#finding-gleap-status-ids) below to get the raw ID strings to put in `gleaptracker.config.ts`.
 
@@ -219,7 +213,7 @@ Override with env (see `.env.local.example`):
 The job lists `OPEN` / `INPROGRESS` **BUG** and **INQUIRY** tickets, then for each:
 
 1. **Skip** if the ticket has a linked tracker whose status is **not** `DONE` (OPEN and INPROGRESS trackers both count as active).
-2. **Skip** classic parked statuses if they still appear (`On Slack`, `Waiting for Update`, snoozed).
+2. **Skip** leftover parked lanes if they still appear (`On Slack`, `Waiting for Update`, snoozed). The job never writes Waiting.
 3. **Skip** when the last customer message is newer than the last human agent message, or when no human agent has replied yet (AI/bot greetings do not start the clock).
 4. Otherwise send `followUp.followUpMessage` or `followUp.closeMessage` and, at the close threshold, set the customer ticket to `DONE`.
 5. Same-day re-runs are idempotent: an already-sent follow-up / close text is not sent again.
@@ -236,7 +230,7 @@ The job does not start when `NODE_ENV=test` or Vitest is running.
 
 Support agents use native Gleap **Link to tracker** (create or attach) when a customer ticket needs a Slack discussion. GleapTracker listens for `ticket.created` / `ticket.updated` and treats a new tracker or a new `linkedTickets` entry as the trigger — **not** an "On Slack" status change.
 
-You can still use a parked "On Slack" status (and a message template) so the bot does not auto-close the customer ticket while you investigate. Linking to the tracker is what opens Slack.
+Linking to the tracker is what opens Slack. Newly linked `OPEN` customers are set to `INPROGRESS` (already-`INPROGRESS` tickets are left alone). Auto follow-up / close-no-reply is skipped while a linked tracker is not `DONE`.
 
 #### Tracker ticket board
 

@@ -45,7 +45,6 @@ const processLinkedTickets = async (
   issueUrl: string,
 ) => {
   const gleap = getGleapClient()
-  const cfg = config.gleap
 
   await Promise.all(
     linkedTicketIds.map(async (ticketId) => {
@@ -59,10 +58,10 @@ const processLinkedTickets = async (
 
       const ops: Promise<unknown>[] = []
 
-      if (["OPEN", "INPROGRESS", ...Object.values(cfg.onSlackStatuses)].includes(ticket.status)) {
+      if (ticket.status === "OPEN") {
         ops.push(
-          gleap.tickets.update(ticket.id, { status: cfg.waitingStatus }).then((ok) => {
-            if (ok) console.log(`[Tracker] Linked ticket ${ticket.id} → waiting status ✓`)
+          gleap.tickets.update(ticket.id, { status: "INPROGRESS" }).then((ok) => {
+            if (ok) console.log(`[Tracker] Linked ticket ${ticket.id} → INPROGRESS ✓`)
           }),
         )
       }

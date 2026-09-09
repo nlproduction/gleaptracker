@@ -22,9 +22,9 @@ const config: GleapTrackerConfig = {
     doneStatus: "DONE",
 
     /** SEE README.md on how to get custom status IDs from Gleap */
-    /** CUSTOM status IDs treated as parked / on-hold when applying waitingStatus */
+    /** Legacy On Slack lanes — not applied on Link to tracker; cron may still ignore them */
     onSlackStatuses: { BUG: "cz2qz", INQUIRY: "lm7lx3" },
-    /** CUSTOM status values applied to linked customer tickets while fix is pending */
+    /** Legacy Waiting for Update — not applied on Link to tracker / Slack sync */
     waitingStatus: "9oyq7h",
 
     /** Optional: Workflow run on linked tickets when the tracker issue is marked Done */

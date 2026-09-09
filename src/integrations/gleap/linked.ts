@@ -1,4 +1,3 @@
-import config from "../../../gleaptracker.config"
 import {
   getGleapClient,
   isTrackerTicket,
@@ -71,12 +70,11 @@ export const pickPrimaryCustomer = (
   return customers[0]
 }
 
-export const applyWaitingStatus = async (ticket: GleapTicket): Promise<void> => {
-  const cfg = config.gleap
-  const parked = new Set(["OPEN", "INPROGRESS", ...Object.values(cfg.onSlackStatuses)])
-  if (!parked.has(ticket.status)) return
-  const ok = await getGleapClient().tickets.update(ticket.id, { status: cfg.waitingStatus })
-  if (ok) console.log(`[Gleap] Linked ticket ${ticket.id} → waiting status ✓`)
+/** After Link to tracker / Slack sync: OPEN → INPROGRESS. Any other status is left alone. */
+export const markLinkedInProgress = async (ticket: GleapTicket): Promise<void> => {
+  if (ticket.status !== "OPEN") return
+  const ok = await getGleapClient().tickets.update(ticket.id, { status: "INPROGRESS" })
+  if (ok) console.log(`[Gleap] Linked ticket ${ticket.id} → INPROGRESS ✓`)
 }
 
 export const findTrackerByBugId = async (

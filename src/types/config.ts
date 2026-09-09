@@ -5,11 +5,11 @@ export interface GleapConfig {
   workflowId?: string;
   /** Ticket type used for tracker/release tickets */
   trackerTicketType: string;
-  /** Status IDs that mean a ticket is parked / on hold (used when applying waitingStatus) */
+  /** Legacy parked / on-hold status IDs (On Slack). Not applied on Link to tracker. */
   onSlackStatuses: { BUG: string; INQUIRY: string };
   /** Status value for closed/done tickets */
   doneStatus: string;
-  /** Status value for "waiting for update" (applied to linked tickets) */
+  /** Legacy "Waiting for Update" status — not applied on Link to tracker / Slack sync */
   waitingStatus: string;
   /** Type applied to rejected tickets (legacy; unused in the tracker-SoT flow) */
   inProgressType: string;

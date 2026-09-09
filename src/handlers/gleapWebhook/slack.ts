@@ -7,7 +7,7 @@ import {
   TRACKER_FORM,
 } from "../../integrations/gleap/formData"
 import {
-  applyWaitingStatus,
+  markLinkedInProgress,
   loadCustomerTickets,
   loadTicket,
   pickPrimaryCustomer,
@@ -121,7 +121,7 @@ const createTrackerThread = async (
       await getGleapClient().messages.addNote(latest.id, `Slack thread: ${threadUrl}`)
     }
 
-    await Promise.all(customers.map((c) => applyWaitingStatus(c)))
+    await Promise.all(customers.map((c) => markLinkedInProgress(c)))
 
     console.log(
       `[Gleap] Tracker ${latest.id} Slack thread created (${threadUrl || msg.ts}) ✓`,
@@ -169,7 +169,7 @@ export const syncTrackerSlack = async (
   const newcomers = customers.filter((c) => !state.notifiedIds.includes(c.id))
   for (const ticket of newcomers) {
     await postInTrackerThread(state.slackThreadTs, buildNewRelatedTicketText(ticket))
-    await applyWaitingStatus(ticket)
+    await markLinkedInProgress(ticket)
     console.log(
       `[Gleap] Tracker ${tracker.id} — new related ticket ${ticket.id} (#${ticket.bugId}) ✓`,
     )
