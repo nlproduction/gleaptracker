@@ -1,59 +1,47 @@
-import assert from "node:assert/strict"
+import { describe, expect, it } from "vitest"
 import { parseFixesFromCommits, parseFixesGleapIds, parseRefsGleapIds } from "./commits"
-import { buildHeaderText, formatFixesLine, formatRefsLine } from "./slack/blocks"
-import type { GleapTicket } from "./gleap/client"
 
-const ids = parseFixesGleapIds("fix zoom\n\nFixes Gleap-237650\nRefs Gleap-237536, Gleap-237537")
-assert.deepEqual(ids, ["237650"])
+describe("parseFixesGleapIds", () => {
+  it("extracts tracker ids from Fixes Gleap-<id> tokens", () => {
+    expect(
+      parseFixesGleapIds("fix zoom\n\nFixes Gleap-237650\nRefs Gleap-237536, Gleap-237537"),
+    ).toEqual(["237650"])
+  })
 
-assert.deepEqual(
-  parseRefsGleapIds("Fixes Gleap-1\nRefs Gleap-10, Gleap-11"),
-  ["10", "11"],
-)
+  it("is case-insensitive and dedups within one message", () => {
+    expect(parseFixesGleapIds("fixes Gleap-1 and Fixes Gleap-1")).toEqual(["1"])
+  })
 
-assert.deepEqual(
-  parseFixesFromCommits([
-    { message: "Fixes Gleap-1" },
-    { message: "also Fixes Gleap-1 and Fixes Gleap-2" },
-  ]),
-  ["1", "2"],
-)
-
-assert.equal(formatFixesLine(237650), "Fixes Gleap-237650")
-assert.equal(formatRefsLine([237536, 237537]), "Refs Gleap-237536, Gleap-237537")
-
-const primary = {
-  id: "c1",
-  title: "Orange typo",
-  bugId: 237536,
-  status: "OPEN",
-  type: "BUG",
-  trackerTicket: false,
-  session: { name: "Jay", email: "jay@example.com" },
-} as GleapTicket
-
-const extra = {
-  id: "c2",
-  title: "Same typo elsewhere",
-  bugId: 237537,
-  status: "OPEN",
-  type: "BUG",
-  trackerTicket: false,
-} as GleapTicket
-
-const withExtras = buildHeaderText({
-  primary,
-  extras: [extra],
-  trackerBugId: 237650,
+  it("ignores Refs, wrong verbs, and other noise", () => {
+    expect(
+      parseFixesGleapIds("chore: bump\nFixed Gleap-9\nRefs Gleap-10\nFixes Ticket-11"),
+    ).toEqual([])
+  })
 })
-assert.match(withExtras, /`#237536`/)
-assert.match(withExtras, /jay@example.com/)
-assert.match(withExtras, /Linked: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/c2\|#237537>/)
-assert.match(withExtras, /`Fixes Gleap-237650`/)
-assert.match(withExtras, /`Refs Gleap-237536, Gleap-237537`/)
 
-const solo = buildHeaderText({ primary, extras: [], trackerBugId: 237650 })
-assert.doesNotMatch(solo, /Linked:/)
-assert.match(solo, /`Refs Gleap-237536`/)
+describe("parseRefsGleapIds", () => {
+  it("collects customer ids from a Refs line", () => {
+    expect(parseRefsGleapIds("Fixes Gleap-1\nRefs Gleap-10, Gleap-11")).toEqual([
+      "10",
+      "11",
+    ])
+  })
+})
 
-console.log("commits + header tests passed")
+describe("parseFixesFromCommits", () => {
+  it("scans every commit and dedups ids across the push", () => {
+    expect(
+      parseFixesFromCommits([
+        { message: "Fixes Gleap-1" },
+        { message: "also Fixes Gleap-1 and Fixes Gleap-2" },
+        { message: "chore: ignore me" },
+      ]),
+    ).toEqual(["1", "2"])
+  })
+
+  it("returns nothing when commits have no Fixes tokens", () => {
+    expect(
+      parseFixesFromCommits([{ message: "refactor parser" }, { message: undefined }]),
+    ).toEqual([])
+  })
+})

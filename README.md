@@ -314,6 +314,15 @@ pnpm dev
 
 This starts Express on port **3000** (override with `PORT=3001 pnpm dev`).
 
+### Tests
+
+```bash
+pnpm test        # vitest run
+pnpm test:watch  # re-run on change
+```
+
+Tests are colocated as `src/**/*.test.ts` (close pipeline, Slack blocks, link/thread sync, GitHub `Fixes Gleap-<id>`, Slack close modal). Slack / Gleap / GitHub clients are mocked — no live network. Dummy env vars are set in `vitest.setup.ts` so `gleaptracker.config.ts` can load.
+
 Use [ngrok](https://ngrok.com) to expose your local server for webhook testing:
 
 ```bash
@@ -421,6 +430,7 @@ Certbot will automatically add the HTTPS virtual host and redirect HTTP → HTTP
 ```
 gleaptracker/
 ├── gleaptracker.config.ts       # All non-secret configuration
+├── vitest.config.mts            # Unit test runner (`pnpm test`)
 ├── .env.local                   # Secrets (gitignored)
 ├── .env.local.example
 ├── src/
@@ -435,7 +445,8 @@ gleaptracker/
 │   └── integrations/
 │       ├── gleap/{client.ts,close.ts,tracker.ts,…}
 │       ├── slack/{client.ts,blocks.ts}
-│       ├── commits.ts
+│       └── commits.ts
+│   # colocated `*.test.ts` files — mocked Slack / Gleap / GitHub, no network
 │       ├── linear/client.ts
 │       └── jira/client.ts
 ```

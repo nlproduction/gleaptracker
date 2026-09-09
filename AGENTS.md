@@ -40,9 +40,13 @@ src/
 pnpm dev        # run with tsx watch (no build needed)
 pnpm build      # tsc compile to dist/
 pnpm lint       # tsc --noEmit (type-check only, no output)
+pnpm test       # vitest run (unit tests, no network)
+pnpm test:watch # vitest watch mode
 pnpm start      # run compiled dist/ (requires build first)
 pnpm start:pm2  # start via PM2 using ecosystem.config.cjs
 ```
+
+Unit tests live next to the code as `src/**/*.test.ts`. They mock Slack / Gleap / GitHub clients — do not call live APIs. `vitest.setup.ts` seeds dummy `process.env` values before `gleaptracker.config.ts` is imported.
 
 Always run `pnpm lint` after making changes to verify no TypeScript errors.
 
