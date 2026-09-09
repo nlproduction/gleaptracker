@@ -5,9 +5,8 @@ import { FOLLOWUP_FORM, patchTicketFormData } from "../integrations/gleap/formDa
 import { findLinkedTracker } from "../integrations/gleap/linked"
 import {
   analyzeConversation,
-  composeCloseMessage,
-  composeFollowUpMessage,
   decideFollowUpAction,
+  resolveFollowUpWorkflowId,
   shouldSkipCustomerTicket,
   type FollowUpDecision,
   type FollowUpKind,
@@ -147,7 +146,6 @@ const inspectTicket = async (
   ticket: GleapTicket
   skip: SkipReason | null
   decision: FollowUpDecision
-  alreadySentClose: boolean
 }> => {
   const followUp = config.followUp
   const latest = (await getGleapClient().tickets.get(ticket.id)) ?? ticket
@@ -158,11 +156,11 @@ const inspectTicket = async (
 
   const skip = shouldSkipCustomerTicket(latest, tracker)
   if (skip) {
-    return { ticket: latest, skip, decision: { action: "none", reason: skip }, alreadySentClose: false }
+    return { ticket: latest, skip, decision: { action: "none", reason: skip } }
   }
 
   const messages = await listTicketMessages(latest.id, delayMs)
-  const cursor = analyzeConversation(messages, followUp, latest.formData)
+  const cursor = analyzeConversation(messages, latest.formData)
   const decision = decideFollowUpAction({
     now,
     lastCustomerAt: cursor.lastCustomerAt,
@@ -171,42 +169,38 @@ const inspectTicket = async (
     alreadySentClose: cursor.alreadySentClose,
     followUpAfterDays: followUp.followUpAfterDays,
     closeAfterDays: followUp.closeAfterDays,
+    ticketType: latest.type,
   })
-  return { ticket: latest, skip: null, decision, alreadySentClose: cursor.alreadySentClose }
+  return { ticket: latest, skip: null, decision }
 }
 
 const applyAction = async (
   ticket: GleapTicket,
   action: FollowUpKind,
-  alreadySentClose: boolean,
   now: Date,
 ): Promise<FollowUpKind> => {
   if (action === "none") return "none"
-  const gleap = getGleapClient()
-  const { followUpMessage, closeMessage } = config.followUp
+
+  const workflowId = resolveFollowUpWorkflowId(ticket.type, action)
+  if (!workflowId) {
+    throw new Error(`No follow-up workflow configured for ${ticket.type} / ${action}`)
+  }
+
   const sentAt = now.toISOString()
+  const flagKey =
+    action === "follow_up" ? FOLLOWUP_FORM.followUpSentAt : FOLLOWUP_FORM.closeSentAt
+  const flagged = await patchTicketFormData(ticket.id, ticket.formData, {
+    [flagKey]: sentAt,
+  })
+  if (!flagged) throw new Error(`formData flag write failed for ${ticket.id}`)
 
-  if (action === "follow_up") {
-    await patchTicketFormData(ticket.id, ticket.formData, {
-      [FOLLOWUP_FORM.followUpSentAt]: sentAt,
-    })
-    const ok = await gleap.messages.sendMessage(ticket.id, composeFollowUpMessage(followUpMessage))
-    if (!ok) throw new Error(`follow-up send failed for ${ticket.id}`)
-    console.log(`${LOG} Follow-up sent to ticket ${ticket.id} (bugId ${ticket.bugId}) ✓`)
-    return "follow_up"
-  }
+  const ok = await getGleapClient().tickets.runWorkflow(ticket.id, workflowId)
+  if (!ok) throw new Error(`workflow ${workflowId} failed for ${ticket.id}`)
 
-  if (!alreadySentClose) {
-    await patchTicketFormData(ticket.id, ticket.formData, {
-      [FOLLOWUP_FORM.closeSentAt]: sentAt,
-    })
-    const ok = await gleap.messages.sendMessage(ticket.id, composeCloseMessage(closeMessage))
-    if (!ok) throw new Error(`close message send failed for ${ticket.id}`)
-  }
-  const closed = await gleap.tickets.update(ticket.id, { status: config.gleap.doneStatus })
-  if (!closed) throw new Error(`close status update failed for ${ticket.id}`)
-  console.log(`${LOG} Closed ticket ${ticket.id} (bugId ${ticket.bugId}) — no reply ✓`)
-  return "close"
+  console.log(
+    `${LOG} ${action === "follow_up" ? "Follow-up" : "Close"} workflow ${workflowId} on ticket ${ticket.id} (bugId ${ticket.bugId}) ✓`,
+  )
+  return action
 }
 
 let jobRunning = false
@@ -246,7 +240,7 @@ export const runFollowUpJob = async (
           continue
         }
 
-        // Re-read tracker + messages immediately before send (TOCTOU):
+        // Re-read tracker + messages immediately before invoke (TOCTOU):
         // an agent may have Linked to tracker, or the customer may have replied.
         const second = await inspectTicket(first.ticket, now, delayMs)
         if (second.decision.action !== first.decision.action) {
@@ -257,12 +251,7 @@ export const runFollowUpJob = async (
           continue
         }
 
-        const applied = await applyAction(
-          second.ticket,
-          second.decision.action,
-          second.alreadySentClose,
-          now,
-        )
+        const applied = await applyAction(second.ticket, second.decision.action, now)
         if (applied === "follow_up") summary.followedUp += 1
         if (applied === "close") summary.closed += 1
         await sleep(delayMs)

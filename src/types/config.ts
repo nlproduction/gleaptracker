@@ -24,19 +24,39 @@ export const parseEnvNumber = (raw: string | undefined, fallback: number): numbe
   return Number.isFinite(n) ? n : fallback
 }
 
+export interface FollowUpWorkflowIds {
+  /** BUG no-reply nudge (default 3 days). Gleap: "Follow-up 3 days". */
+  bugFollowUp: string;
+  /** BUG no-reply close (default 7 days). Gleap: "Follow-up 7 days". */
+  bugClose: string;
+  /**
+   * INQUIRY no-reply close (default 7 days). Gleap: "Close Inbox Ticket - 7 days no reply".
+   * INQUIRY has no soft 3-day follow-up.
+   */
+  inquiryClose: string;
+}
+
 export interface FollowUpConfig {
   /** node-cron expression; default `0 8 * * *` (08:00 every day). Set `off` to disable. */
   cron: string;
   /** IANA timezone for the cron expression (default UTC) */
   timezone: string;
-  /** Days after the last human agent reply with no customer reply before the first nudge */
+  /** Days after the last human agent reply with no customer reply before the first BUG nudge */
   followUpAfterDays: number;
   /** Days after the last human agent reply with no customer reply before close-no-reply */
   closeAfterDays: number;
-  /** Customer-visible 3-day (or configured) follow-up text */
-  followUpMessage: string;
-  /** Customer-visible close-no-reply text (sent immediately before DONE) */
-  closeMessage: string;
+  /** Gleap workflow IDs invoked by the cron (not auto-triggered in Gleap) */
+  workflows: FollowUpWorkflowIds;
+  /**
+   * Unused by the cron — customer copy lives in the Gleap workflows.
+   * Kept as a reference for the old bot-message path.
+   */
+  followUpMessage?: string;
+  /**
+   * Unused by the cron — customer copy / DONE live in the Gleap workflows.
+   * Kept as a reference for the old bot-message path.
+   */
+  closeMessage?: string;
 }
 
 export interface SlackConfig {

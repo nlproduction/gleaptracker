@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import config from "../../gleaptracker.config"
 import { FOLLOWUP_FORM } from "../integrations/gleap/formData"
 import { customerTicket, trackerTicket } from "../test/fixtures"
-import { composeCloseMessage, composeFollowUpMessage } from "./followUpDecision"
 
 const mocks = vi.hoisted(() => ({
   listTickets: vi.fn(),
@@ -10,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listMessages: vi.fn(),
   sendMessage: vi.fn().mockResolvedValue(true),
   update: vi.fn().mockResolvedValue(true),
+  runWorkflow: vi.fn().mockResolvedValue(true),
   findLinkedTracker: vi.fn(),
   schedule: vi.fn(),
   validate: vi.fn().mockReturnValue(true),
@@ -20,7 +20,12 @@ vi.mock("../integrations/gleap/client", async (importOriginal) => {
   return {
     ...actual,
     getGleapClient: () => ({
-      tickets: { list: mocks.listTickets, get: mocks.getTicket, update: mocks.update },
+      tickets: {
+        list: mocks.listTickets,
+        get: mocks.getTicket,
+        update: mocks.update,
+        runWorkflow: mocks.runWorkflow,
+      },
       messages: { list: mocks.listMessages, sendMessage: mocks.sendMessage },
     }),
   }
@@ -74,11 +79,24 @@ const emptySummaryExtras = {
   skippedOverlap: 0,
 }
 
+const { bugFollowUp, bugClose, inquiryClose } = config.followUp.workflows
+
+const stubLane = (tickets: ReturnType<typeof customerTicket>[]) => {
+  const byId = Object.fromEntries(tickets.map((t) => [t.id, t]))
+  mocks.listTickets.mockResolvedValue({
+    tickets,
+    count: tickets.length,
+    totalCount: tickets.length,
+  })
+  mocks.getTicket.mockImplementation(async (id: string) => byId[id] ?? customerTicket({ id }))
+}
+
 describe("runFollowUpJob", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.sendMessage.mockResolvedValue(true)
     mocks.update.mockResolvedValue(true)
+    mocks.runWorkflow.mockResolvedValue(true)
     mocks.listTickets.mockResolvedValue({ tickets: [], count: 0, totalCount: 0 })
     mocks.listMessages.mockResolvedValue([])
     mocks.findLinkedTracker.mockResolvedValue(null)
@@ -100,49 +118,27 @@ describe("runFollowUpJob", () => {
     expect(calls.some((p: { type?: string }) => String(p.type).includes(","))).toBe(false)
   })
 
-  it("sends a follow-up, closes no-reply, skips an active linked tracker, and logs counts", async () => {
-    const follow = customerTicket({ id: "cust-follow", bugId: 1, status: "OPEN" })
-    const close = customerTicket({ id: "cust-close", bugId: 2, status: "INPROGRESS" })
-    const linked = customerTicket({ id: "cust-linked", bugId: 3, status: "OPEN" })
+  it("runs BUG 3-day follow-up workflow A and skips linked/parked tickets", async () => {
+    const follow = customerTicket({ id: "cust-follow", bugId: 1, status: "OPEN", type: "BUG" })
+    const linked = customerTicket({ id: "cust-linked", bugId: 3, status: "OPEN", type: "BUG" })
     const parked = customerTicket({
       id: "cust-parked",
       bugId: 4,
       status: config.gleap.onSlackStatuses.BUG,
     })
-    const byId: Record<string, ReturnType<typeof customerTicket>> = {
-      "cust-follow": follow,
-      "cust-close": close,
-      "cust-linked": linked,
-      "cust-parked": parked,
-    }
-
-    mocks.listTickets.mockResolvedValue({
-      tickets: [follow, close, linked, parked],
-      count: 4,
-      totalCount: 4,
-    })
-    mocks.getTicket.mockImplementation(async (id: string) => byId[id] ?? customerTicket({ id }))
+    stubLane([follow, linked, parked])
     mocks.findLinkedTracker.mockImplementation(async (ticket: { id: string }) => {
       if (ticket.id === "cust-linked") return trackerTicket({ status: "INPROGRESS" })
       if (ticket.id === "cust-follow") return trackerTicket({ status: "DONE" })
       return null
     })
-    mocks.listMessages.mockImplementation(async ({ ticket }: { ticket: string }) => {
-      if (ticket === "cust-follow") return agentThenSilence(80)
-      if (ticket === "cust-close") return agentThenSilence(130)
-      return agentThenSilence(80)
-    })
+    mocks.listMessages.mockResolvedValue(agentThenSilence(80))
 
     const summary = await runFollowUpJob(now, 0)
 
-    expect(mocks.sendMessage).toHaveBeenCalledWith(
-      "cust-follow",
-      composeFollowUpMessage(config.followUp.followUpMessage),
-    )
-    expect(mocks.sendMessage).toHaveBeenCalledWith(
-      "cust-close",
-      composeCloseMessage(config.followUp.closeMessage),
-    )
+    expect(mocks.runWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.runWorkflow).toHaveBeenCalledWith("cust-follow", bugFollowUp)
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(mocks.update).toHaveBeenCalledWith(
       "cust-follow",
       expect.objectContaining({
@@ -151,24 +147,19 @@ describe("runFollowUpJob", () => {
         }),
       }),
     )
-    expect(mocks.update).toHaveBeenCalledWith(
-      "cust-close",
-      expect.objectContaining({
-        formData: expect.objectContaining({
-          [FOLLOWUP_FORM.closeSentAt]: now.toISOString(),
-        }),
-      }),
+    expect(mocks.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: config.gleap.doneStatus }),
     )
-    expect(mocks.update).toHaveBeenCalledWith("cust-close", { status: config.gleap.doneStatus })
-    expect(mocks.sendMessage).not.toHaveBeenCalledWith("cust-linked", expect.anything())
-    expect(mocks.sendMessage).not.toHaveBeenCalledWith("cust-parked", expect.anything())
+    expect(mocks.runWorkflow).not.toHaveBeenCalledWith("cust-linked", expect.anything())
+    expect(mocks.runWorkflow).not.toHaveBeenCalledWith("cust-parked", expect.anything())
 
     expect(summary).toEqual({
-      scanned: 4,
+      scanned: 3,
       skippedLinkedTracker: 1,
       skippedParked: 1,
       followedUp: 1,
-      closed: 1,
+      closed: 0,
       errors: 0,
       ...emptySummaryExtras,
     })
@@ -178,28 +169,85 @@ describe("runFollowUpJob", () => {
     )
   })
 
-  it("is safe to re-run the same day — formData / mark counts as already sent", async () => {
+  it("runs BUG 7-day close workflow B without sendMessage or a local DONE write", async () => {
+    const close = customerTicket({ id: "cust-close", bugId: 2, status: "INPROGRESS", type: "BUG" })
+    stubLane([close])
+    mocks.listMessages.mockResolvedValue(agentThenSilence(170))
+
+    const summary = await runFollowUpJob(now, 0)
+
+    expect(mocks.runWorkflow).toHaveBeenCalledWith("cust-close", bugClose)
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.update).toHaveBeenCalledWith(
+      "cust-close",
+      expect.objectContaining({
+        formData: expect.objectContaining({
+          [FOLLOWUP_FORM.closeSentAt]: now.toISOString(),
+        }),
+      }),
+    )
+    expect(mocks.update).not.toHaveBeenCalledWith("cust-close", { status: config.gleap.doneStatus })
+    expect(summary).toEqual({
+      scanned: 1,
+      skippedLinkedTracker: 0,
+      skippedParked: 0,
+      followedUp: 0,
+      closed: 1,
+      errors: 0,
+      ...emptySummaryExtras,
+    })
+  })
+
+  it("runs INQUIRY 7-day close workflow C only", async () => {
+    const inquiry = customerTicket({
+      id: "cust-inquiry",
+      bugId: 9,
+      status: "OPEN",
+      type: "INQUIRY",
+    })
+    stubLane([inquiry])
+    mocks.listMessages.mockResolvedValue(agentThenSilence(170))
+
+    const summary = await runFollowUpJob(now, 0)
+
+    expect(mocks.runWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.runWorkflow).toHaveBeenCalledWith("cust-inquiry", inquiryClose)
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(summary.closed).toBe(1)
+    expect(summary.followedUp).toBe(0)
+  })
+
+  it("does not run a 3-day follow-up workflow on INQUIRY", async () => {
+    const inquiry = customerTicket({
+      id: "cust-inquiry",
+      bugId: 9,
+      status: "OPEN",
+      type: "INQUIRY",
+    })
+    stubLane([inquiry])
+    mocks.listMessages.mockResolvedValue(agentThenSilence(80))
+
+    const summary = await runFollowUpJob(now, 0)
+
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(summary.followedUp).toBe(0)
+    expect(summary.closed).toBe(0)
+    expect(summary.skippedTooSoon).toBe(1)
+  })
+
+  it("is safe to re-run the same day — formData workflow flag counts as already sent", async () => {
     const ticket = customerTicket({
       id: "cust-1",
       status: "OPEN",
       formData: { [FOLLOWUP_FORM.followUpSentAt]: isoHoursAgo(1) },
     })
-    mocks.listTickets.mockResolvedValue({ tickets: [ticket], count: 1, totalCount: 1 })
-    mocks.getTicket.mockResolvedValue(ticket)
-    mocks.listMessages.mockResolvedValue([
-      ...agentThenSilence(80),
-      {
-        id: "m-bot",
-        type: "BOT",
-        senderType: "bot",
-        bot: true,
-        createdAt: isoHoursAgo(1),
-        text: composeFollowUpMessage("Just checking in\n\ndo you have   any updates?"),
-      },
-    ])
+    stubLane([ticket])
+    mocks.listMessages.mockResolvedValue(agentThenSilence(80))
 
     const summary = await runFollowUpJob(now, 0)
 
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(summary.followedUp).toBe(0)
     expect(summary.closed).toBe(0)
@@ -207,37 +255,27 @@ describe("runFollowUpJob", () => {
     expect(summary.errors).toBe(0)
   })
 
-  it("does not close-message again when the close mark/flag is set, but still marks DONE", async () => {
+  it("does not re-run the close workflow when the close flag is already set", async () => {
     const ticket = customerTicket({
       id: "cust-1",
       status: "OPEN",
       formData: { [FOLLOWUP_FORM.closeSentAt]: isoHoursAgo(1) },
     })
-    mocks.listTickets.mockResolvedValue({ tickets: [ticket], count: 1, totalCount: 1 })
-    mocks.getTicket.mockResolvedValue(ticket)
-    mocks.listMessages.mockResolvedValue([
-      ...agentThenSilence(130),
-      {
-        id: "m-close",
-        type: "BOT",
-        senderType: "bot",
-        bot: true,
-        createdAt: isoHoursAgo(1),
-        text: composeCloseMessage(config.followUp.closeMessage),
-      },
-    ])
+    stubLane([ticket])
+    mocks.listMessages.mockResolvedValue(agentThenSilence(170))
 
     const summary = await runFollowUpJob(now, 0)
 
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
     expect(mocks.sendMessage).not.toHaveBeenCalled()
-    expect(mocks.update).toHaveBeenCalledWith("cust-1", { status: "DONE" })
-    expect(summary.closed).toBe(1)
+    expect(mocks.update).not.toHaveBeenCalledWith("cust-1", { status: "DONE" })
+    expect(summary.closed).toBe(0)
+    expect(summary.skippedAlreadyActed).toBe(1)
   })
 
-  it("skips send when a tracker is linked between decide and apply (TOCTOU)", async () => {
+  it("skips invoke when a tracker is linked between decide and apply (TOCTOU)", async () => {
     const ticket = customerTicket({ id: "cust-1", status: "OPEN" })
-    mocks.listTickets.mockResolvedValue({ tickets: [ticket], count: 1, totalCount: 1 })
-    mocks.getTicket.mockResolvedValue(ticket)
+    stubLane([ticket])
     mocks.listMessages.mockResolvedValue(agentThenSilence(80))
     mocks.findLinkedTracker
       .mockResolvedValueOnce(null)
@@ -245,15 +283,15 @@ describe("runFollowUpJob", () => {
 
     const summary = await runFollowUpJob(now, 0)
 
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(summary.followedUp).toBe(0)
     expect(summary.skippedLinkedTracker).toBe(1)
   })
 
-  it("skips send when the customer replies between decide and apply", async () => {
+  it("skips invoke when the customer replies between decide and apply", async () => {
     const ticket = customerTicket({ id: "cust-1", status: "OPEN" })
-    mocks.listTickets.mockResolvedValue({ tickets: [ticket], count: 1, totalCount: 1 })
-    mocks.getTicket.mockResolvedValue(ticket)
+    stubLane([ticket])
     mocks.findLinkedTracker.mockResolvedValue(null)
     mocks.listMessages
       .mockResolvedValueOnce(agentThenSilence(80))
@@ -270,6 +308,7 @@ describe("runFollowUpJob", () => {
 
     const summary = await runFollowUpJob(now, 0)
 
+    expect(mocks.runWorkflow).not.toHaveBeenCalled()
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(summary.followedUp).toBe(0)
     expect(summary.skippedWaitingOnUs).toBe(1)
@@ -302,10 +341,7 @@ describe("runFollowUpJob", () => {
   it("counts a per-ticket failure without aborting the rest of the run", async () => {
     const ok = customerTicket({ id: "cust-ok", status: "OPEN" })
     const bad = customerTicket({ id: "cust-bad", status: "OPEN" })
-    mocks.listTickets.mockResolvedValue({ tickets: [bad, ok], count: 2, totalCount: 2 })
-    mocks.getTicket.mockImplementation(async (id: string) =>
-      id === "cust-ok" ? ok : bad,
-    )
+    stubLane([bad, ok])
     mocks.findLinkedTracker.mockImplementation(async (ticket: { id: string }) => {
       if (ticket.id === "cust-bad") throw new Error("gleap down")
       return null
@@ -317,6 +353,7 @@ describe("runFollowUpJob", () => {
     expect(summary.errors).toBe(1)
     expect(summary.followedUp).toBe(1)
     expect(summary.scanned).toBe(2)
+    expect(mocks.runWorkflow).toHaveBeenCalledWith("cust-ok", bugFollowUp)
   })
 })
 
@@ -346,6 +383,11 @@ describe("startFollowUpCron", () => {
     expect(config.followUp.cron).toBe("0 8 * * *")
     expect(config.followUp.timezone).toBe("UTC")
     expect(config.followUp.followUpAfterDays).toBe(3)
-    expect(config.followUp.closeAfterDays).toBe(5)
+    expect(config.followUp.closeAfterDays).toBe(7)
+    expect(config.followUp.workflows).toEqual({
+      bugFollowUp: "66d638ab459ae610a55b625c",
+      bugClose: "66d639db15f03a3715a1c4a7",
+      inquiryClose: "68942e98c7b00a2ffbb28be2",
+    })
   })
 })

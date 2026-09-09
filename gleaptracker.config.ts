@@ -41,14 +41,24 @@ We're closing the ticket. Feel free to reply to reopen it if the issue persists.
 
   // -------------------------------------------------------------------------
   // Daily no-reply follow-up / close (node-cron in the Express/PM2 process)
-  // Replaces Gleap-native 3-day / 5-day workflows so linked trackers can be
-  // checked. Default schedule: 08:00 UTC. Set FOLLOWUP_CRON=off to disable.
+  // Decides *when* to act (tracker skip + human-agent clock); Gleap workflows
+  // own customer messaging / status. Keep those workflows on trigger "none"
+  // (live, not auto) so only this cron fires them. FOLLOWUP_CRON=off disables.
   // -------------------------------------------------------------------------
   followUp: {
     cron: process.env.FOLLOWUP_CRON || "0 8 * * *",
     timezone: process.env.FOLLOWUP_TZ || "UTC",
     followUpAfterDays: parseEnvNumber(process.env.FOLLOWUP_AFTER_DAYS, 3),
-    closeAfterDays: parseEnvNumber(process.env.FOLLOWUP_CLOSE_AFTER_DAYS, 5),
+    closeAfterDays: parseEnvNumber(process.env.FOLLOWUP_CLOSE_AFTER_DAYS, 7),
+    workflows: {
+      bugFollowUp:
+        process.env.FOLLOWUP_BUG_FOLLOWUP_WORKFLOW_ID || "66d638ab459ae610a55b625c",
+      bugClose:
+        process.env.FOLLOWUP_BUG_CLOSE_WORKFLOW_ID || "66d639db15f03a3715a1c4a7",
+      inquiryClose:
+        process.env.FOLLOWUP_INQUIRY_CLOSE_WORKFLOW_ID || "68942e98c7b00a2ffbb28be2",
+    },
+    // Unused by the cron (workflows own the copy). Left as a reference.
     followUpMessage: `Just checking in — do you have any updates on this?
 
 If we don't hear back, we'll close the ticket. Reply anytime and we'll pick it up.`,
