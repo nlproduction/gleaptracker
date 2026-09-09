@@ -430,7 +430,7 @@ Certbot will automatically add the HTTPS virtual host and redirect HTTP → HTTP
 ```
 gleaptracker/
 ├── gleaptracker.config.ts       # All non-secret configuration
-├── vitest.config.ts             # Unit test runner (`pnpm test`)
+├── vitest.config.mts            # Unit test runner (`pnpm test`)
 ├── .env.local                   # Secrets (gitignored)
 ├── .env.local.example
 ├── src/
