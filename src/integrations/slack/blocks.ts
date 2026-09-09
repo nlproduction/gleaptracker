@@ -80,7 +80,10 @@ export const buildActionsBlock = (opts: {
 
   return {
     type: "actions" as const,
-    block_id: "actions_block",
+    // New id after the header redesign: Slack caches interactive bindings by
+    // block_id, so reusing "actions_block" left Close dispatching as the old
+    // first button (`tracker_status`) and the modal never opened.
+    block_id: "tracker_actions",
     elements,
   }
 }

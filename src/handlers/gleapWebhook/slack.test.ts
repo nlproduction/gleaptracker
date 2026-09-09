@@ -50,7 +50,11 @@ vi.mock("../../integrations/gleap/linked", async (importOriginal) => {
   }
 })
 
-import { markTrackerSlackClosed, syncTrackerSlack } from "./slack"
+import {
+  markTrackerSlackClosed,
+  resetSlackSyncDedupForTests,
+  syncTrackerSlack,
+} from "./slack"
 
 const actionIds = (blocks: KnownBlock[]): string[] => {
   const actions = blocks.find((b) => b.type === "actions") as
@@ -215,6 +219,88 @@ describe("syncTrackerSlack — subsequent link", () => {
       inProgressExtra.id,
       expect.objectContaining({ status: expect.anything() }),
     )
+  })
+})
+
+describe("syncTrackerSlack — reopen", () => {
+  const primary = customerTicket()
+  const reopened = trackerTicket({
+    id: "tracker-reopen-1",
+    status: "INPROGRESS",
+    formData: {
+      slack_thread: TEST_THREAD_URL,
+      slack_thread_ts: TEST_THREAD_TS,
+      primary_ticket_id: "cust-1",
+      slack_notified_ids: "cust-1",
+      close_processed: "true",
+      close_silent: "false",
+    },
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetSlackSyncDedupForTests()
+    mocks.loadTicket.mockResolvedValue(reopened)
+    mocks.loadCustomerTickets.mockResolvedValue([primary])
+    mocks.update.mockResolvedValue({ ok: true })
+    mocks.postMessage.mockResolvedValue({ ok: true, ts: "reopen.1" })
+    mocks.ticketUpdate.mockResolvedValue(true)
+  })
+
+  it("posts 🔄 Reopened once when two ticket.updated syncs race", async () => {
+    await Promise.all([syncTrackerSlack(reopened), syncTrackerSlack(reopened)])
+
+    const reopenPosts = mocks.postMessage.mock.calls.filter(
+      ([arg]) => arg.text === "🔄 Reopened",
+    )
+    expect(reopenPosts).toHaveLength(1)
+    expect(reopenPosts[0][0]).toEqual({
+      channel: TEST_SLACK_CHANNEL_ID,
+      thread_ts: TEST_THREAD_TS,
+      text: "🔄 Reopened",
+    })
+    expect(mocks.ticketUpdate).toHaveBeenCalledWith(
+      reopened.id,
+      expect.objectContaining({
+        formData: expect.objectContaining({
+          close_processed: "false",
+          close_silent: "false",
+        }),
+      }),
+    )
+  })
+
+  it("does not post a second Reopened on a follow-up sync inside the dedup window", async () => {
+    await syncTrackerSlack(reopened)
+    await syncTrackerSlack(reopened)
+
+    expect(
+      mocks.postMessage.mock.calls.filter(([{ text }]) => text === "🔄 Reopened"),
+    ).toHaveLength(1)
+  })
+
+  it("allows another Reopened after the tracker is marked closed on Slack", async () => {
+    await syncTrackerSlack(reopened)
+    await markTrackerSlackClosed(reopened)
+    await syncTrackerSlack(reopened)
+
+    expect(
+      mocks.postMessage.mock.calls.filter(([{ text }]) => text === "🔄 Reopened"),
+    ).toHaveLength(2)
+  })
+
+  it("posts Reopened again after the dedup window if Gleap still reports close_processed", async () => {
+    vi.useFakeTimers()
+    try {
+      await syncTrackerSlack(reopened)
+      await vi.advanceTimersByTimeAsync(3_001)
+      await syncTrackerSlack(reopened)
+      expect(
+        mocks.postMessage.mock.calls.filter(([{ text }]) => text === "🔄 Reopened"),
+      ).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
