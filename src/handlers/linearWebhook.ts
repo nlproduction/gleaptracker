@@ -1,7 +1,8 @@
 import type { Request, Response } from "express"
 import crypto from "crypto"
 import config from "../../gleaptracker.config"
-import { getGleapClient } from "../integrations/gleap/client"
+import { closeTracker } from "../integrations/gleap/close"
+import { findTrackerByBugId } from "../integrations/gleap/linked"
 
 const recentlyProcessed = new Set<string>()
 const DEDUP_TTL_MS = 30_000
@@ -30,18 +31,23 @@ interface LinearIssueData {
 }
 
 const verifySignature = (headerSignature: string, rawBody: string): boolean => {
-  if (!headerSignature) return false
-  const secret = config.linear!.webhookSecret
+  if (!headerSignature || !config.linear?.webhookSecret) return false
+  const secret = config.linear.webhookSecret
   const headerBuf = new Uint8Array(Buffer.from(headerSignature, "hex"))
   const computed = new Uint8Array(
     crypto.createHmac("sha256", secret).update(rawBody).digest(),
   )
+  if (headerBuf.length !== computed.length) return false
   return crypto.timingSafeEqual(computed, headerBuf)
 }
 
 const processIssueUpdate = async (data: Record<string, unknown>) => {
   const issue = data as unknown as LinearIssueData
-  const cfg = config.linear!
+  const cfg = config.linear
+  if (!cfg) {
+    console.log("[Linear] No Linear config — skipping")
+    return
+  }
 
   const hasTrackerLabel = issue.labels?.some(
     (l) => l.name.toLowerCase() === cfg.trackerLabel.toLowerCase(),
@@ -60,7 +66,7 @@ const processIssueUpdate = async (data: Record<string, unknown>) => {
 
   const bugIdMatch = issue.title?.match(/^\[(\d+)\]/)
   if (!bugIdMatch) {
-    console.warn(
+    console.error(
       `[Linear] Issue ${issue.id} skipped — title has no leading [bugId]: "${issue.title}"`,
     )
     return
@@ -77,39 +83,13 @@ const processIssueUpdate = async (data: Record<string, unknown>) => {
 
   console.log(`[Linear] Processing done issue ${issue.id}, Gleap bugId: ${bugId}`)
 
-  const gleap = getGleapClient()
-  const { tickets } = await gleap.tickets.list({ bugId })
-
-  const ticket = tickets[0]
-  if (!ticket) {
-    console.warn(`[Linear] No Gleap ticket found for bugId ${bugId}`)
+  const tracker = await findTrackerByBugId(bugId)
+  if (!tracker) {
+    console.error(`[Linear] No Gleap tracker ticket found for bugId ${bugId}`)
     return
   }
 
-  const linkedTickets = (ticket.linkedTickets ?? []) as string[]
-  if (linkedTickets.length) {
-    if (config.gleap.workflowId) {
-      await Promise.all(
-        linkedTickets.map(async (id) => {
-          const ok = await gleap.tickets.runWorkflow(id, config.gleap.workflowId!)
-          if (ok) console.log(`[Linear] Workflow applied to ticket ${id} ✓`)
-        }),
-      )
-    } else if (config.gleap.bugFixedMessage) {
-      const msg = config.gleap.bugFixedMessage
-      await Promise.all(
-        linkedTickets.map(async (id) => {
-          const ok = await gleap.messages.sendMessage(id, msg)
-          if (ok) console.log(`[Linear] Bug-fixed message sent to ticket ${id} ✓`)
-        }),
-      )
-    } else {
-      console.warn("[Linear] No workflowId or bugFixedMessage configured — skipping customer notification")
-    }
-  }
-
-  const ok = await gleap.tickets.update(ticket.id, { status: config.gleap.doneStatus })
-  if (ok) console.log(`[Linear] Tracker ticket ${ticket.id} marked as DONE ✓`)
+  await closeTracker(tracker, { source: "linear" })
 }
 
 export function linearOptions(_req: Request, res: Response): void {

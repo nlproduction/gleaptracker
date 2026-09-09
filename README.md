@@ -1,171 +1,107 @@
 # GleapTracker
 
-An **Express** (Node.js) service that connects **Gleap** (customer support) with **Slack** and your issue tracker (**Linear** and/or **Jira**). When a support ticket needs dev attention, it flows through Slack for team review and automatically creates a tracked issue.
+An **Express** (Node.js) service that connects **Gleap** (customer support) with **Slack**. The **Gleap tracker ticket** is the issue-group source of truth (not Linear). When an agent uses Gleap **Link to tracker**, gleaptracker opens a Slack thread for that tracker. Closing the tracker notifies linked customers.
+
+Linear and Jira remain optional/legacy. The new close path does not require them.
 
 ---
 
 ## Workflow
 
-Click to watch the demo on YouTube:
-
-[![Watch the demo](https://img.youtube.com/vi/Vpwf07QsIrI/maxresdefault.jpg)](https://youtu.be/Vpwf07QsIrI)
+The Slack thread is created when a tracker is created or a customer ticket is linked — **not** after a Confirm click. There are no Confirm or Reject buttons.
 
 ```
-Customer reports bug in Gleap
+Customer reports a bug in Gleap
          │
          ▼
-Agent applies a template "Send to Slack" on Gleap
-The template adds a message "..." and sets ticket status → ONSLACK.
-Special status "ONSLACK" allows agents seeing which tickets are "on pause"
-and also it prevents Gleap bot from automatically closing them.
+Agent uses native Gleap “Link to tracker”
+(create a new tracker, or link to an existing one)
          │
          ▼
-GleapTracker > Slack API: add message to #gleap-tickets channel on Slack.
-Developers and agents discuss it in a nested thread.
-At the bottom of the message there are 3 buttons:
-  ┌──────────────────────────────┐
-  │  `#12345`  *Ticket title*    │
-  │  Customer Name / email       │
-  │  [Confirm] [Reject] [Gleap↗] │
-  └──────────────────────────────┘
+Gleap → GleapTracker webhook (ticket.created / ticket.updated)
+GleapTracker detects the tracker (or the new link) and:
          │
-         |
-Once devs get enough information, they click "Confirm" or "Reject" in the original message:
-         |
-    ┌────┴─────┐
-    ▼          ▼
-Confirm      Reject
-    │          │
-    │          └─ 1. A modal is shown on Slack, asking to enter
-    |             the reason of the rejection;
-    |             2. GleapTracker > Gleap API: Note with the reason added to Gleap ticket
-    |             4. GleapTracker > Gleap API: Ticket status set to INPROGRESS
-    |             5. Support agent resumes conversation with the customer
-    |             6. GleapTracker > Slack API: Add "❌ Rejected" status to initial thread message
-    |             7. GleapTracker > Slack API: add comment to the thread: "❌ Rejected: <Reason>"
-    │
-    ▼
-A modal is shown on Slack, asking to enter a title of a new tracker ticket on Gleap,
-or pick up an existing tracker ticket from a drop-down
-         |
-    ┌────┴──────────────────────────────────────────────┐
-    ▼                                                   ▼
-New Tracker ticket                      Connect to existing Tracker ticket
-    |                                                   │
-    |                                                   ▼
-"Tracker ticket" created in Gleap,      Send request to Gleap API: connect
-with <GleapTackerBugId>, on the         current ticket to the selected tracker ticket ID
-FOR-RELEASE board                                       |
-    └───────────────┬───────────────────────────────────┘
-                    │
-                    ▼
-        Get <GlearTrackerTicketBugId>
-                    │
-                    ▼
-GleapTracker > Slack API: Add "⏳ Confirmed" label on the Slack thread initial message
-(so it's visible when you scroll messages on the channel)
-    │
-    ▼
-GleapTracker > Slack API: add message in the thread:
-"⏳ Confirmed, will be fixed soon. Open in Gleap: <TicketUrl>"
-- so suppot agents sees an update notification
-    │
-    ▼
-GleapTracker sends a request to Linear/Jira API - to ceate an issue:
-________________________________________________
-Title: [<GleapTackerBugId>] <GleapTicketTitle>
-Description: "Open in Gleap: <GleapTicketUl>"
-________________________________________________
-    │
-    ▼
-GleapTracker > Gleap API: for the customer's ticket, set status to "Waiting for update"
-This special ticket status helps prevent the bot from automatically closing those tickets
-when there's no reply from the customer for >7 days; also it helps putting aside tickets
-that at the moment don't need any attention.
-    │
-    ▼
-Once the bug is confirmed, developers create a bugfix/... branch and start working on it.
-Commit that fixes the issue can contain "Fixes: <ISSUE-ID>" in its commit message
-    |
-    ▼
-Devs git push commit to master, upload .zip to license server, push master to remote git
-    │
-    ▼
-Linear/Jira track commits with "Fixes ..." on the master branch.
-When they see it, the issue gets automatically closed
-    │
-    ▼
-Linear/Jira > GleapTracker Webhook (issue:updated)
-    │
-    ▼
-Linear/Jira issue title parsed to get <GlearTrackerTicketBugId>
-    │
-    ▼
-GleapTracker > Gleap API: get tracker ticket with <GlearTrackerTicketBugId>
-Tracker Ticket contains `string[]` array of IDs of linked tickets on Gleap
-    │
-    ▼
-GleapTracker > Gleap API: run a workflow for each of the linked tickets.
-The worklow sends a message to the customer (you can set yours on Gleap)
-Example:
-________________________________________________
-Thank you for your patience. We've fixed the bug
-and released a new version. Please update the
-plugin to the latest version.
-
-We’re closing the ticket. Feel free to reply to
-reopen it if the issue persists. If you have any
-other questions, please open a new ticket 🙂
-________________________________________________
-    │
-    ▼
-`GleapTracker > Gleap API`: update tracker ticket, set status=`DONE`
-    │
-    ▼
-When tracker ticket is closed, Gleap automatically closes all linked tickets.
-    │
-    ▼
-GleapTracker > Slack API: Add "✅ Closed" label on the Slack thread initial message
-(so it's visible when you scroll messages on the channel)
-    │
-    ▼
-GleapTracker > Slack API: Add "✅ Closed" message in the thread,
-so suppot agents see an update notification
-    │
-    ▼
-EXTRA: If customer replies back saying that the issue wasn't fixed for them
-Support agent changes ticket status to "In progress" on Gleap, and asks for more details
-If support agent is able to resolve on their own, they do it and change ticket status to "Done".
-If support agent need dev help again: they manually change status to "On slack" -
-Gleap ticket already has Slack Thread ID and Slack Thread URL
-    │
-    ▼
-Gleap > GleapTracker webhook (ticket:updated)
-    │
-    ▼
-GleapTracker checks if the ticket has "On Slack" status
-and if Slack Thread ID is already set; if true, then:
-    │
-    ▼
-GleapTracker > Slack API: update initial thread message,
-change status from "✅ Closed" to "🔄 Reopened"
-GleapTracker > Slack API: add message to the thread: "🔄 Reopened"
-(so developer who worked on the ticket gets notified)
-    │
-    ▼
-When issue is resolved, support agent changes ticket status on Gleap to "Done"
-Status on Slack thread message changes to "✅ Closed" again
+         ▼
+If the tracker has no Slack thread yet:
+  1. Post a Slack root card in the same overall format as before:
+       `#<customerBugId>`  *customer title*
+       Customer name / email
+       Linked: #…, #…          ← only extra customer tickets (deep links)
+       `Fixes Gleap-<trackerBugId>`
+       `Refs Gleap-<customerBugId1>, Gleap-<customerBugId2>, …`
+       [tracker status] [Close] [Open in Gleap ↗]
+     Header identity (bugId / title / email) comes from the **original
+     customer ticket**, not the tracker.
+     Refs always lists every linked customer bugId.
+     Fixes is only the tracker bugId.
+     Close is hidden when the tracker is already DONE.
+  2. First in-thread message = tracker ticket description
+     (Gleap-generated tracker description).
+  3. Persist slack_thread / slack_thread_ts on the **tracker**.
+         │
+         ▼
+If another customer ticket is linked to the same tracker:
+  • Refresh the Slack root (Refs, Linked, status, Close visibility)
+  • Post in the thread:
+        *New related ticket*
+        #<bugId> <title>
+        <email>
+        [Open in Gleap]
+         │
+         ▼
+Developers copy Fixes / Refs into commit messages and work as usual.
+         │
+         ▼
+Close the tracker via any of three paths (same pipeline):
+  A. Gleap: tracker status → DONE
+  B. Git: push to master containing `Fixes Gleap-<trackerBugId>`
+  C. Slack: Close button → modal (prefilled bug-fixed message)
+         │
+         ▼
+Shared close pipeline:
+  • If the Close modal (or caller) has text → send that message to each
+    linked **customer** ticket (or run gleap.workflowId / bugFixedMessage
+    when no custom text was provided).
+  • If the Close modal is submitted empty → **silent** close: no customer
+    messages.
+  • Set the tracker to DONE (skip if already DONE).
+  • Do **not** status-update children in code — Gleap closes linked
+    tickets when the tracker is DONE.
+  • Update the Slack header to closed (no Close button) and post ✅ Closed.
+         │
+         ▼
+If the tracker leaves DONE, Slack shows the live status + Close again
+and posts 🔄 Reopened.
 ```
 
-### Adding internal notes to Gleap ticket from Slack thread
+### Commit convention
 
-Inside any ticket thread on Slack, team members can post an internal note directly to the linked Gleap ticket by including `g:note` anywhere in their message:
+Copy the system lines from the Slack header into the fixing commit:
+
+```
+Fixes Gleap-237650
+Refs Gleap-237536, Gleap-237537
+```
+
+- **`Fixes Gleap-<id>`** — tracker bugId only. A push to `master` that contains this token closes that tracker (path B).
+- **`Refs Gleap-<id>, …`** — all linked **customer** bugIds. Always present on the Slack card. Optional in the commit; not used to close anything.
+
+### Slack Close modal (path C)
+
+The Close button opens a modal prefilled with `gleap.bugFixedMessage` (English thank-you / please update the plugin).
+
+- Edit the text and submit → that message is sent to each linked customer ticket, then the tracker is set DONE.
+- Clear the text and submit → silent close (DONE, no customer messages).
+
+### Adding internal notes to the tracker from Slack
+
+Inside any tracker thread on Slack, include `g:note` anywhere in a message:
 
 ```
 g:note Customer confirmed they're on v3.2, still reproducible
 ```
 
-GleapTracker strips the `g:note` tag and adds the rest of the message as an internal note on the Gleap ticket (visible to agents only, not the customer). Useful for capturing context from Slack discussions without switching to Gleap.
+GleapTracker strips the tag and adds the rest as an internal note on the **tracker** ticket (the thread owner).
 
 ---
 
@@ -175,7 +111,8 @@ GleapTracker strips the `g:note` tag and adds the rest of the message as an inte
 - pnpm
 - A [Gleap](https://gleap.io) account with API access
 - A [Slack App](https://api.slack.com/apps) with the scopes below
-- A [Linear](https://linear.app) workspace and/or [Jira](https://www.atlassian.com/software/jira) project
+- Optional: a [Linear](https://linear.app) workspace and/or [Jira](https://www.atlassian.com/software/jira) project (legacy issue-create path only)
+- A GitHub repo webhook if you want path B (`Fixes Gleap-<id>` on push to `master`)
 
 ---
 
@@ -199,16 +136,17 @@ Edit `.env.local` and fill in all values. See [.env.local.example](.env.local.ex
 
 ### 3. Configure the integration
 
-Edit `gleaptracker.ts` in the project root. This file controls all non-secret settings:
+Edit `gleaptracker.config.ts` in the project root. This file controls all non-secret settings:
 
 | Field                     | Description                                                                                                                          |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `gleap.workflowId`        | _(optional)_ Gleap workflow ID run on each linked ticket when the issue is closed — use this **or** `bugFixedMessage`, not both      |
-| `gleap.bugFixedMessage`   | _(optional)_ Plain-text message sent directly to each linked ticket when the issue is closed — fallback when `workflowId` is not set |
+| `gleap.workflowId`        | _(optional)_ Gleap workflow ID run on each linked **customer** ticket when the tracker is closed without a custom Slack message — use this **or** `bugFixedMessage`, not both |
+| `gleap.bugFixedMessage`   | _(optional)_ Default customer message (also the Slack Close modal prefill). Used when `workflowId` is not set and the close is not silent |
 | `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)                                                                               |
-| `gleap.onSlackStatuses`   | Status IDs that trigger posting to Slack, keyed by ticket type: `{ BUG: "...", INQUIRY: "..." }`                                    |
-| `gleap.waitingStatus`     | Status applied to linked tickets while fix is pending                                                                                |
-| `issueTracker`            | `"linear"` \| `"jira"` \| `"both"`                                                                                                   |
+| `gleap.onSlackStatuses`   | Parked / on-hold status IDs, keyed by ticket type. Newly linked customers in these (or OPEN / INPROGRESS) get `waitingStatus`      |
+| `gleap.waitingStatus`     | Status applied to newly linked customer tickets while the fix is pending                                                             |
+| `issueTracker`            | `"none"` (default tracker-SoT path; no Linear/Jira create) \| `"linear"` \| `"jira"` \| `"both"`                                     |
+| `github.closeBranches`    | Branches whose pushes close trackers via `Fixes Gleap-<trackerBugId>` (default: `["master"]`)                                        |
 | `linear.teamId`           | Your Linear team ID                                                                                                                  |
 | `linear.labelIds`         | Label IDs applied to created Linear issues                                                                                           |
 | `linear.stateId`          | Initial state ID for new Linear issues (e.g. "Todo")                                                                                 |
@@ -220,7 +158,7 @@ Edit `gleaptracker.ts` in the project root. This file controls all non-secret se
 
 #### Finding Gleap status IDs
 
-Several fields in `gleaptracker.ts` require internal Gleap status IDs (e.g. `"cz2qz"`) rather than the human-readable names shown in the UI (`"On Slack"`). To find them:
+Several fields in `gleaptracker.config.ts` require internal Gleap status IDs (e.g. `"cz2qz"`) rather than the human-readable names shown in the UI (`"On Slack"`). To find them:
 
 1. Open your Gleap project → **Bugs**
 2. Open the browser DevTools → **Network** tab
@@ -232,8 +170,8 @@ Fields that need these IDs:
 
 | Field                 | What it maps to in Gleap                          |
 | --------------------- | ------------------------------------------------- |
-| `gleap.onSlackStatuses.BUG` | Your custom "Send to Slack" status for Bug tickets |
-| `gleap.onSlackStatuses.INQUIRY` | Your custom "Send to Slack" status for Inquiry tickets |
+| `gleap.onSlackStatuses.BUG` | Parked / on-hold status for Bug tickets (e.g. "On Slack") |
+| `gleap.onSlackStatuses.INQUIRY` | Parked / on-hold status for Inquiry tickets |
 | `gleap.waitingStatus` | Your "Waiting for Update" status                  |
 | `gleap.doneStatus`    | Your "Done / Closed" status (often just `"DONE"`) |
 
@@ -247,9 +185,9 @@ Go to **Gleap → Bugs → Settings** and create two custom statuses:
 
 | Purpose                                     | Suggested name                  | Used in config        |
 | ------------------------------------------- | ------------------------------- | --------------------- |
-| Ticket sent to Slack, awaiting dev decision (BUG)     | "On Slack" (any name) | `gleap.onSlackStatuses.BUG`     |
-| Ticket sent to Slack, awaiting dev decision (INQUIRY) | "On Slack" (any name) | `gleap.onSlackStatuses.INQUIRY` |
-| Bug confirmed, fix in progress              | "Waiting for Update" (any name) | `gleap.waitingStatus` |
+| Customer ticket parked / on hold (BUG)      | "On Slack" (any name) | `gleap.onSlackStatuses.BUG`     |
+| Customer ticket parked / on hold (INQUIRY)  | "On Slack" (any name) | `gleap.onSlackStatuses.INQUIRY` |
+| Linked to a tracker, fix in progress        | "Waiting for Update" (any name) | `gleap.waitingStatus` |
 
 These must be **custom** statuses (not the built-in ones) because Gleap's workflows that automatically close tickets without reply only trigger for "Open"/"In progress" statuses — custom statuses are excluded from automatic closing. This means tickets sitting in "On Slack" or "Waiting for Update" won't get auto-closed while the team is working on them.
 
@@ -264,21 +202,28 @@ Gleap can automatically follow up with customers who haven't replied after an ag
 
 Make sure these workflows target **only** `OPEN` and `INPROGRESS` — do **not** include your custom "On Slack" or "Waiting for Update" statuses. Tickets in those statuses are intentionally on hold and should not receive follow-ups.
 
-#### "Send to Slack" message template
+#### Link to tracker (creates Slack)
 
-In **Gleap → Settings → Message templates**, create a new template (e.g. "Send to Slack") that:
+Support agents use native Gleap **Link to tracker** (create or attach) when a customer ticket needs a Slack discussion. GleapTracker listens for `ticket.created` / `ticket.updated` and treats a new tracker or a new `linkedTickets` entry as the trigger — **not** an "On Slack" status change.
 
-1. Sends a message to the customer, e.g.:
-   > We've received your report and our team is reviewing it. We'll get back to you soon!
-2. Changes the ticket status to your custom "On Slack" status
-
-Support agents apply this template when a ticket needs dev attention. GleapTracker detects the status change via webhook and automatically posts the ticket to Slack.
+You can still use a parked "On Slack" status (and a message template) so the bot does not auto-close the customer ticket while you investigate. Linking to the tracker is what opens Slack.
 
 #### Tracker ticket board
 
-Tracker tickets (created when a dev confirms a bug) are internal-only and not meant to be opened or managed by support agents — they exist purely for automation. It's recommended to create a **dedicated board** in Gleap (e.g. "Trackers" or "For Release") to keep them out of the regular support queue.
+Tracker tickets are the issue-group source of truth. Create a **dedicated board** in Gleap (e.g. "For Release") so they stay out of the regular support queue.
 
-In `gleaptracker.config.ts`, set `gleap.trackerTicketType` to the type/board name you created (default is `"FOR-RELEASE"`).
+In `gleaptracker.config.ts`, set `gleap.trackerTicketType` to that type (default `"FOR-RELEASE"`).
+
+Add these custom text fields on the tracker board so Slack state survives (the BUG board already has the Slack pair):
+
+| Field                 | Purpose                                              |
+| --------------------- | ---------------------------------------------------- |
+| `slack_thread`        | Permalink to the Slack root message                  |
+| `slack_thread_ts`     | Slack thread timestamp                               |
+| `primary_ticket_id`   | Original customer ticket shown in the header         |
+| `slack_notified_ids`  | Customer ticket IDs already announced in the thread  |
+| `close_processed`     | Dedup flag so DONE webhooks do not re-notify         |
+| `close_silent`        | Set when Slack Close was submitted with empty text   |
 
 ### 5. Slack App
 
@@ -310,7 +255,7 @@ Enable **Event Subscriptions**, set Request URL to `https://your-domain/api/slac
 
 - `message.channels`
 
-This enables the `g:note` feature — type `g:note your note text` in any ticket thread to add an internal note to the linked Gleap ticket.
+This enables the `g:note` feature — type `g:note your note text` in a tracker thread to add an internal note on the tracker ticket.
 
 #### Install the app
 
@@ -323,7 +268,22 @@ In Gleap: **Settings → Integrations → Webhooks → Add Webhook**
 - URL: `https://your-domain/api/webhooks/gleap`
 - Events: `ticket.created`, `ticket.updated`
 
-### 7. Linear Webhook
+### 7. GitHub Webhook (close path B)
+
+In the product repo (or a release repo): **Settings → Webhooks → Add webhook**
+
+- Payload URL: `https://your-domain/api/webhooks/github`
+- Content type: `application/json`
+- Secret: the same value as `GITHUB_WEBHOOK_SECRET` in `.env.local`
+- Events: **Just the push event**
+
+GleapTracker handles `push` to branches listed in `github.closeBranches` (default `master`). Each commit message is scanned for `Fixes Gleap-<trackerBugId>`. Matching open trackers run the same close/notify pipeline as a Gleap DONE (deduped if the tracker is already DONE).
+
+A GitHub Actions “release” workflow can use the same hook by pushing the annotated commit to `master`, or by pointing an additional webhook at this URL. `ping` events return 200.
+
+### 8. Linear Webhook (legacy)
+
+Optional. Only needed if you still close via Linear issues created by the old path (`issueTracker` `"linear"` or `"both"`).
 
 In Linear: **Settings → API → Webhooks → New Webhook**
 
@@ -331,16 +291,18 @@ In Linear: **Settings → API → Webhooks → New Webhook**
 - Data change events: **Issue**
 - Copy the signing secret to `LINEAR_WEBHOOK_SECRET` in `.env.local`
 
-The webhook fires when an issue is marked Done. GleapTracker looks for issues with the `gleap-tracker-ticket` label (configurable in `gleaptracker.config.ts`) and a title matching `[bugId] Title`.
+The webhook fires when an issue is marked Done. GleapTracker looks for issues with the `gleap-tracker-ticket` label and a title matching `[bugId] Title`, then runs the shared tracker close pipeline.
 
-### 8. Jira Webhook
+### 9. Jira Webhook (legacy)
+
+Optional. Same as Linear for the old Jira create path.
 
 In Jira: **Settings → System → WebHooks → Create a WebHook**
 
 - URL: `https://your-domain/api/webhooks/jira?secret=<your JIRA_WEBHOOK_SECRET>`
 - Events: **Issue → updated**
 
-The webhook fires on every issue update. GleapTracker filters for status transitions to your configured `doneStatusName` and issues with a title matching `[bugId] Title`.
+GleapTracker filters for status transitions to `doneStatusName` and titles matching `[bugId] Title`.
 
 ---
 
@@ -383,7 +345,7 @@ pnpm add -g pm2
 
 The repo includes `ecosystem.config.cjs` which tells PM2 how to start the app:
 
-- **`node_args: "-r dotenv/config"`** — preloads dotenv before any module is imported, so `.env.local` is read before `gleaptracker.ts` evaluates `process.env.*`
+- **`node_args: "-r dotenv/config"`** — preloads dotenv before any module is imported, so `.env.local` is read before `gleaptracker.config.ts` evaluates `process.env.*`
 - **`DOTENV_CONFIG_PATH`** — points dotenv to `.env.local` instead of the default `.env`
 - **`PORT`** — the port Express listens on (must match your Apache `ProxyPass` port)
 
@@ -465,13 +427,15 @@ gleaptracker/
 │   ├── server.ts                # Express app entry (routes + morgan)
 │   ├── types/config.ts          # Types for gleaptracker.config.ts
 │   ├── handlers/                # Webhook / Slack HTTP handlers
-│   │   ├── gleapWebhook.ts
+│   │   ├── gleapWebhook/
+│   │   ├── githubWebhook.ts
 │   │   ├── linearWebhook.ts
 │   │   ├── jiraWebhook.ts
 │   │   └── slack.ts
 │   └── integrations/
-│       ├── gleap/{client.ts,tracker.ts}
-│       ├── slack/client.ts
+│       ├── gleap/{client.ts,close.ts,tracker.ts,…}
+│       ├── slack/{client.ts,blocks.ts}
+│       ├── commits.ts
 │       ├── linear/client.ts
 │       └── jira/client.ts
 ```
@@ -483,6 +447,7 @@ gleaptracker/
 | Method | Path                            | Body                                   |
 | ------ | ------------------------------- | -------------------------------------- |
 | POST   | `/api/webhooks/gleap`           | JSON                                   |
+| POST   | `/api/webhooks/github`          | raw JSON (`X-Hub-Signature-256`)       |
 | POST   | `/api/webhooks/linear`          | raw JSON (signature)                   |
 | POST   | `/api/webhooks/jira?secret=...` | JSON                                   |
 | POST   | `/api/slack`                    | raw (Slack URL-encoded or JSON events) |

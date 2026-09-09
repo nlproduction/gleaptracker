@@ -5,13 +5,13 @@ export interface GleapConfig {
   workflowId?: string;
   /** Ticket type used for tracker/release tickets */
   trackerTicketType: string;
-  /** Status IDs that trigger sending a ticket to Slack, keyed by ticket type */
+  /** Status IDs that mean a ticket is parked / on hold (used when applying waitingStatus) */
   onSlackStatuses: { BUG: string; INQUIRY: string };
   /** Status value for closed/done tickets */
   doneStatus: string;
   /** Status value for "waiting for update" (applied to linked tickets) */
   waitingStatus: string;
-  /** Type applied to rejected tickets */
+  /** Type applied to rejected tickets (legacy; unused in the tracker-SoT flow) */
   inProgressType: string;
   /** Message to the customers who were waiting for the bugfix */
   bugFixedMessage?: string;
@@ -48,11 +48,23 @@ export interface JiraConfig {
   webhookSecret: string;
 }
 
+export interface GitHubConfig {
+  /** Secret used to verify incoming GitHub webhooks (`X-Hub-Signature-256`) */
+  webhookSecret: string;
+  /** Branch names whose pushes close trackers via `Fixes Gleap-<bugId>` */
+  closeBranches: string[];
+}
+
 export interface GleapTrackerConfig {
   gleap: GleapConfig;
   slack: SlackConfig;
-  /** Which issue tracker(s) to use */
-  issueTracker: "linear" | "jira" | "both";
+  /**
+   * Which issue tracker(s) to create issues in when a tracker ticket is processed.
+   * The Slack / close flow does not require Linear or Jira — use `"none"` for the
+   * tracker-SoT path. `"linear"` / `"jira"` / `"both"` remain for the legacy creator.
+   */
+  issueTracker: "linear" | "jira" | "both" | "none";
   linear?: LinearConfig;
   jira?: JiraConfig;
+  github?: GitHubConfig;
 }

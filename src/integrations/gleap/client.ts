@@ -6,6 +6,7 @@ const APP_BASE = "https://app.gleap.io/projects"
 const TYPE_PATH: Record<string, string> = {
   BUG: "bugs",
   INQUIRY: "inquiries",
+  "FOR-RELEASE": "for-release",
 }
 
 export const getGleapTicketUrl = (
@@ -25,7 +26,16 @@ export interface GleapLinkedTicketStub {
   id: string
   title: string
   bugId: number
-  shareToken: string
+  shareToken?: string
+  trackerTicket?: boolean
+  type?: string
+  status?: string
+}
+
+export interface GleapSession {
+  id?: string
+  name?: string
+  email?: string
 }
 
 export interface GleapTicket {
@@ -39,6 +49,29 @@ export interface GleapTicket {
   tags?: string[]
   linkedTickets?: string[] | GleapLinkedTicketStub[]
   formData?: Record<string, unknown>
+  session?: GleapSession
+  reporter?: GleapSession
+  contact?: GleapSession
+}
+
+export type GleapLinkedRef = string | GleapLinkedTicketStub
+
+export const linkedTicketId = (ref: GleapLinkedRef): string =>
+  typeof ref === "string" ? ref : ref.id
+
+export const isTrackerTicket = (t: {
+  trackerTicket?: boolean
+  type?: string
+}): boolean => !!t.trackerTicket || t.type === config.gleap.trackerTicketType
+
+export const isTrackerDone = (t: { status?: string }): boolean =>
+  t.status === config.gleap.doneStatus
+
+export const customerDisplay = (
+  ticket: Pick<GleapTicket, "session" | "reporter" | "contact">,
+): { name?: string; email?: string } => {
+  const src = ticket.session ?? ticket.reporter ?? ticket.contact ?? {}
+  return { name: src.name, email: src.email }
 }
 
 export interface GleapTicketsResponse {

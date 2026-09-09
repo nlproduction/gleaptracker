@@ -1,6 +1,7 @@
 import dotenv from "dotenv"
 import express from "express"
 import morgan from "morgan"
+import { githubOptions, githubPost } from "./handlers/githubWebhook"
 import { gleapOptions, gleapPost } from "./handlers/gleapWebhook"
 import { jiraOptions, jiraPost } from "./handlers/jiraWebhook"
 import { linearOptions, linearPost } from "./handlers/linearWebhook"
@@ -32,6 +33,9 @@ app.post("/api/webhooks/gleap", jsonBody, (req, res) => void gleapPost(req, res)
 
 app.options("/api/webhooks/jira", jiraOptions)
 app.post("/api/webhooks/jira", jsonBody, (req, res) => void jiraPost(req, res))
+
+app.options("/api/webhooks/github", githubOptions)
+app.post("/api/webhooks/github", rawBody, (req, res) => void githubPost(req, res))
 
 app.listen(PORT, () => {
   console.log(`GleapTracker listening on http://localhost:${PORT}`)
