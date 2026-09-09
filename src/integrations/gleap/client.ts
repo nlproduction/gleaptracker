@@ -52,6 +52,25 @@ export interface GleapTicket {
   session?: GleapSession
   reporter?: GleapSession
   contact?: GleapSession
+  createdAt?: string
+  updatedAt?: string
+  lastNotification?: string
+}
+
+export type GleapMessageSenderType = "user" | "agent" | "bot" | "system"
+
+export interface GleapMessage {
+  id: string
+  ticket?: string
+  type?: string
+  bot?: boolean
+  comment?: string
+  text?: string
+  createdAt: string
+  senderType?: GleapMessageSenderType
+  user?: { id?: string; email?: string }
+  session?: { id?: string; email?: string }
+  data?: { content?: unknown }
 }
 
 export type GleapLinkedRef = string | GleapLinkedTicketStub
@@ -183,8 +202,30 @@ class GleapTicketsResource {
 // Messages resource
 // ---------------------------------------------------------------------------
 
+export interface ListMessagesParams {
+  ticket: string
+  limit?: number
+  skip?: number
+  paginated?: boolean
+  before?: string
+}
+
 class GleapMessagesResource {
   constructor(private readonly headers: Record<string, string>) {}
+
+  async list(params: ListMessagesParams): Promise<GleapMessage[]> {
+    const query = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ),
+    ).toString()
+    const res = await fetch(`${BASE_URL}/messages?${query}`, { headers: this.headers })
+    if (!res.ok) throw new Error(`[Gleap] GET messages failed: ${res.status}`)
+    const body = (await res.json()) as GleapMessage[] | { items?: GleapMessage[] }
+    return Array.isArray(body) ? body : (body.items ?? [])
+  }
 
   async addNote(ticketId: string, text: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/messages`, {

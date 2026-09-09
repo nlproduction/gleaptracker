@@ -6,7 +6,7 @@
  *
  * Fields that reference process.env must be set in .env.local.
  */
-import type { GleapTrackerConfig } from "./src/types/config";
+import { parseEnvNumber, type GleapTrackerConfig } from "./src/types/config";
 
 const config: GleapTrackerConfig = {
   // -------------------------------------------------------------------------
@@ -22,9 +22,9 @@ const config: GleapTrackerConfig = {
     doneStatus: "DONE",
 
     /** SEE README.md on how to get custom status IDs from Gleap */
-    /** CUSTOM status IDs treated as parked / on-hold when applying waitingStatus */
+    /** Legacy On Slack lanes — not applied on Link to tracker; cron may still ignore them */
     onSlackStatuses: { BUG: "cz2qz", INQUIRY: "lm7lx3" },
-    /** CUSTOM status values applied to linked customer tickets while fix is pending */
+    /** Legacy Waiting for Update — not applied on Link to tracker / Slack sync */
     waitingStatus: "9oyq7h",
 
     /** Optional: Workflow run on linked tickets when the tracker issue is marked Done */
@@ -37,6 +37,22 @@ const config: GleapTrackerConfig = {
     bugFixedMessage: `Thank you for your patience. We've fixed the bug and released a new version. Please update the plugin.
 
 We're closing the ticket. Feel free to reply to reopen it if the issue persists. If you have any other questions, please open a new ticket 🙂`,
+  },
+
+  // -------------------------------------------------------------------------
+  // Daily no-reply follow-up / close (node-cron in the Express/PM2 process)
+  // Replaces Gleap-native 3-day / 5-day workflows so linked trackers can be
+  // checked. Default schedule: 08:00 UTC. Set FOLLOWUP_CRON=off to disable.
+  // -------------------------------------------------------------------------
+  followUp: {
+    cron: process.env.FOLLOWUP_CRON || "0 8 * * *",
+    timezone: process.env.FOLLOWUP_TZ || "UTC",
+    followUpAfterDays: parseEnvNumber(process.env.FOLLOWUP_AFTER_DAYS, 3),
+    closeAfterDays: parseEnvNumber(process.env.FOLLOWUP_CLOSE_AFTER_DAYS, 5),
+    followUpMessage: `Just checking in — do you have any updates on this?
+
+If we don't hear back, we'll close the ticket. Reply anytime and we'll pick it up.`,
+    closeMessage: `Since we haven't heard back, we're closing this ticket. Feel free to reply to reopen it if you still need help. If you have any other questions, please open a new ticket 🙂`,
   },
 
   // -------------------------------------------------------------------------

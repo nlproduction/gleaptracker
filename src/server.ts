@@ -6,6 +6,7 @@ import { gleapOptions, gleapPost } from "./handlers/gleapWebhook"
 import { jiraOptions, jiraPost } from "./handlers/jiraWebhook"
 import { linearOptions, linearPost } from "./handlers/linearWebhook"
 import { slackOptions, slackPost } from "./handlers/slack"
+import { startFollowUpCron } from "./jobs/followUp"
 
 dotenv.config({ path: ".env.local" })
 dotenv.config()
@@ -39,6 +40,7 @@ app.post("/api/webhooks/github", rawBody, (req, res) => void githubPost(req, res
 
 app.listen(PORT, () => {
   console.log(`GleapTracker listening on http://localhost:${PORT}`)
+  startFollowUpCron()
 })
 
 process.on("unhandledRejection", (reason) => {

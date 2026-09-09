@@ -4,6 +4,7 @@ module.exports = {
       name: "gleaptracker",
       script: "dist/src/server.js",
       cwd: ".",
+      instances: 1,
       node_args: "-r dotenv/config",
       env: {
         DOTENV_CONFIG_PATH: ".env.local",

@@ -1,5 +1,10 @@
 import { getGleapClient } from "./client"
 
+export const FOLLOWUP_FORM = {
+  followUpSentAt: "noreply_followup_sent_at",
+  closeSentAt: "noreply_close_sent_at",
+} as const
+
 export const TRACKER_FORM = {
   slackThread: "slack_thread",
   slackThreadTs: "slack_thread_ts",
@@ -22,6 +27,18 @@ export interface TrackerFormState {
   closeProcessed: boolean
   closeSilent: boolean
 }
+
+export interface FollowUpFormState {
+  followUpSentAt: string
+  closeSentAt: string
+}
+
+export const readFollowUpForm = (
+  formData?: Record<string, unknown>,
+): FollowUpFormState => ({
+  followUpSentAt: asString(formData?.[FOLLOWUP_FORM.followUpSentAt]),
+  closeSentAt: asString(formData?.[FOLLOWUP_FORM.closeSentAt]),
+})
 
 export const readTrackerForm = (
   formData?: Record<string, unknown>,

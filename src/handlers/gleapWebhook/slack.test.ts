@@ -126,8 +126,12 @@ describe("syncTrackerSlack — first link", () => {
       `Slack thread: ${TEST_THREAD_URL}`,
     )
     expect(mocks.ticketUpdate).toHaveBeenCalledWith(primary.id, {
-      status: config.gleap.waitingStatus,
+      status: "INPROGRESS",
     })
+    expect(mocks.ticketUpdate).not.toHaveBeenCalledWith(
+      primary.id,
+      expect.objectContaining({ status: config.gleap.waitingStatus }),
+    )
   })
 })
 
@@ -188,6 +192,23 @@ describe("syncTrackerSlack — subsequent link", () => {
           slack_notified_ids: "cust-1,cust-2",
         }),
       }),
+    )
+    expect(mocks.ticketUpdate).toHaveBeenCalledWith(extra.id, { status: "INPROGRESS" })
+    expect(mocks.ticketUpdate).not.toHaveBeenCalledWith(
+      extra.id,
+      expect.objectContaining({ status: config.gleap.waitingStatus }),
+    )
+  })
+
+  it("leaves a newcomer already INPROGRESS (or any non-OPEN status) unchanged", async () => {
+    const inProgressExtra = extraCustomerTicket({ status: "INPROGRESS" })
+    mocks.loadCustomerTickets.mockResolvedValue([primary, inProgressExtra])
+
+    await syncTrackerSlack(tracker, { triggerTicketId: inProgressExtra.id })
+
+    expect(mocks.ticketUpdate).not.toHaveBeenCalledWith(
+      inProgressExtra.id,
+      expect.objectContaining({ status: expect.anything() }),
     )
   })
 })

@@ -143,10 +143,14 @@ Edit `gleaptracker.config.ts` in the project root. This file controls all non-se
 | `gleap.workflowId`        | _(optional)_ Gleap workflow ID run on each linked **customer** ticket when the tracker is closed without a custom Slack message — use this **or** `bugFixedMessage`, not both |
 | `gleap.bugFixedMessage`   | _(optional)_ Default customer message (also the Slack Close modal prefill). Used when `workflowId` is not set and the close is not silent |
 | `gleap.trackerTicketType` | Type used for tracker tickets (default: `FOR-RELEASE`)                                                                               |
-| `gleap.onSlackStatuses`   | Parked / on-hold status IDs, keyed by ticket type. Newly linked customers in these (or OPEN / INPROGRESS) get `waitingStatus`      |
-| `gleap.waitingStatus`     | Status applied to newly linked customer tickets while the fix is pending                                                             |
+| `gleap.onSlackStatuses`   | Legacy "On Slack" lane IDs (not applied on Link to tracker; cron may still ignore leftover tickets in these lanes)                 |
+| `gleap.waitingStatus`     | Legacy "Waiting for Update" ID — **not** applied after link / Slack sync. Newly linked `OPEN` customers go to `INPROGRESS`         |
 | `issueTracker`            | `"none"` (default tracker-SoT path; no Linear/Jira create) \| `"linear"` \| `"jira"` \| `"both"`                                     |
 | `github.closeBranches`    | Branches whose pushes close trackers via `Fixes Gleap-<trackerBugId>` (default: `["master"]`)                                        |
+| `followUp.cron`           | node-cron expression for the daily no-reply job (default `0 8 * * *`, or `FOLLOWUP_CRON`; set `off` to disable)                      |
+| `followUp.timezone`       | IANA timezone for that expression (default `UTC`, or `FOLLOWUP_TZ`)                                                                  |
+| `followUp.followUpAfterDays` | Days after the last **human** agent reply with no customer reply before the first nudge (default `3`, or `FOLLOWUP_AFTER_DAYS`)   |
+| `followUp.closeAfterDays` | Days after that same agent reply before close-no-reply (default `5`, or `FOLLOWUP_CLOSE_AFTER_DAYS`)                                 |
 | `linear.teamId`           | Your Linear team ID                                                                                                                  |
 | `linear.labelIds`         | Label IDs applied to created Linear issues                                                                                           |
 | `linear.stateId`          | Initial state ID for new Linear issues (e.g. "Todo")                                                                                 |
@@ -170,9 +174,9 @@ Fields that need these IDs:
 
 | Field                 | What it maps to in Gleap                          |
 | --------------------- | ------------------------------------------------- |
-| `gleap.onSlackStatuses.BUG` | Parked / on-hold status for Bug tickets (e.g. "On Slack") |
-| `gleap.onSlackStatuses.INQUIRY` | Parked / on-hold status for Inquiry tickets |
-| `gleap.waitingStatus` | Your "Waiting for Update" status                  |
+| `gleap.onSlackStatuses.BUG` | Legacy "On Slack" lane for Bug tickets |
+| `gleap.onSlackStatuses.INQUIRY` | Legacy "On Slack" lane for Inquiry tickets |
+| `gleap.waitingStatus` | Legacy "Waiting for Update" (no longer applied on link) |
 | `gleap.doneStatus`    | Your "Done / Closed" status (often just `"DONE"`) |
 
 ### 4. Gleap workspace setup
@@ -181,32 +185,53 @@ Before the integration can work, a few things need to be configured in Gleap its
 
 #### Custom ticket statuses
 
-Go to **Gleap → Bugs → Settings** and create two custom statuses:
+**Waiting for Update is legacy.** After **Link to tracker** (and when a new related ticket is announced in Slack), gleaptracker only changes customer status when it is `OPEN` — it sets `INPROGRESS`. Already-`INPROGRESS` tickets and any other lane (On Slack, Waiting, Done, …) are left as-is. This path never writes Waiting for Update or On Slack.
 
-| Purpose                                     | Suggested name                  | Used in config        |
-| ------------------------------------------- | ------------------------------- | --------------------- |
-| Customer ticket parked / on hold (BUG)      | "On Slack" (any name) | `gleap.onSlackStatuses.BUG`     |
-| Customer ticket parked / on hold (INQUIRY)  | "On Slack" (any name) | `gleap.onSlackStatuses.INQUIRY` |
-| Linked to a tracker, fix in progress        | "Waiting for Update" (any name) | `gleap.waitingStatus` |
-
-These must be **custom** statuses (not the built-in ones) because Gleap's workflows that automatically close tickets without reply only trigger for "Open"/"In progress" statuses — custom statuses are excluded from automatic closing. This means tickets sitting in "On Slack" or "Waiting for Update" won't get auto-closed while the team is working on them.
+Older "On Slack" / "Waiting for Update" custom lanes may still exist in Gleap. They are no longer required for the tracker-SoT flow. If leftover tickets sit in those lanes, the daily no-reply job ignores them; the **primary** skip is a linked tracker that is not `DONE`.
 
 See [Finding Gleap status IDs](#finding-gleap-status-ids) below to get the raw ID strings to put in `gleaptracker.config.ts`.
 
-#### Follow-up workflows
+#### Daily follow-up / close-no-reply (in-process cron)
 
-Gleap can automatically follow up with customers who haven't replied after an agent response. Set up two workflows under **Gleap → Automations → Workflows**:
+Link to tracker does **not** set the old "On Slack" status, so Gleap-native "no customer reply" workflows are no longer a reliable skip for tracker-path tickets. gleaptracker runs that job itself.
 
-- **3-day follow-up**: trigger when no customer reply 3 days after agent reply, for tickets in `OPEN` or `INPROGRESS` status
-- **5-day follow-up / close**: trigger when no customer reply 5 days after agent reply, same statuses, closes the ticket.
+The Express process (the single PM2 instance) schedules a **node-cron** job — not BullMQ, not Redis, not a second worker.
 
-Make sure these workflows target **only** `OPEN` and `INPROGRESS` — do **not** include your custom "On Slack" or "Waiting for Update" statuses. Tickets in those statuses are intentionally on hold and should not receive follow-ups.
+| | Default |
+| --- | --- |
+| Schedule | `0 8 * * *` (08:00 every day) |
+| Timezone | `UTC` (override with `FOLLOWUP_TZ`, e.g. `Asia/Makassar` / WITA) |
+| First nudge | 3 days after the last **human** agent reply, if the customer has not replied since |
+| Close no-reply | 5 days after that same agent reply (matches the old Gleap 3-day / 5-day automations) |
+
+Override with env (see `.env.local.example`):
+
+- `FOLLOWUP_CRON` — cron expression, or `off` / `false` / `disabled` to skip scheduling
+- `FOLLOWUP_TZ` — IANA timezone (default `UTC`; WITA is `Asia/Makassar`)
+- `FOLLOWUP_AFTER_DAYS` / `FOLLOWUP_CLOSE_AFTER_DAYS` — thresholds
+
+The job lists each `(status, type)` pair separately (`OPEN`/`INPROGRESS` × `BUG`/`INQUIRY`) and dedupes by id (Gleap also accepts CSV filters; we do not depend on that). Then for each:
+
+1. **Skip** if the ticket has a linked tracker whose status is **not** `DONE` (OPEN and INPROGRESS trackers both count as active).
+2. **Skip** leftover parked lanes if they still appear (`On Slack`, `Waiting for Update`, snoozed). The job never writes Waiting.
+3. **Skip** when the last customer message is newer than the last human agent message, or when no human agent has replied yet (AI/bot greetings do not start the clock).
+4. Otherwise send `followUp.followUpMessage` or `followUp.closeMessage` and, at the close threshold, set the customer ticket to `DONE`.
+5. Same-day re-runs are idempotent: a stable `[gleaptracker:follow-up]` / `[gleaptracker:noreply-close]` token plus `formData.noreply_*_sent_at` flags, not a full-template string match.
+6. Immediately before send, the job re-fetches the ticket, linked tracker, and messages and re-runs the decision. If an agent just linked a tracker or the customer replied, the send is skipped.
+
+Each run logs `scanned / skipped-linked-tracker / skipped-parked / skipped-waiting-on-us / skipped-too-soon / skipped-already-acted / skipped-stale / skipped-overlap / followed-up / closed / errors`. Gleap API calls are sequential with a short delay. A second `runFollowUpJob` in the same process no-ops (`skipped-overlap`) while one is running.
+
+**PM2:** run **one** process (`instances: 1` in `ecosystem.config.cjs`). Multi-instance deploy is **unsupported** for this cron — both `noOverlap` and the in-process mutex are single-process only.
+
+Disable the old Gleap 3-day / 5-day automations for this support flow so customers are not double-messaged. Editing those dashboard workflows is out of band for this repo.
+
+The job does not start when `NODE_ENV=test` or Vitest is running.
 
 #### Link to tracker (creates Slack)
 
 Support agents use native Gleap **Link to tracker** (create or attach) when a customer ticket needs a Slack discussion. GleapTracker listens for `ticket.created` / `ticket.updated` and treats a new tracker or a new `linkedTickets` entry as the trigger — **not** an "On Slack" status change.
 
-You can still use a parked "On Slack" status (and a message template) so the bot does not auto-close the customer ticket while you investigate. Linking to the tracker is what opens Slack.
+Linking to the tracker is what opens Slack. Newly linked `OPEN` customers are set to `INPROGRESS` (already-`INPROGRESS` tickets are left alone). Auto follow-up / close-no-reply is skipped while a linked tracker is not `DONE`.
 
 #### Tracker ticket board
 
@@ -354,6 +379,7 @@ pnpm add -g pm2
 
 The repo includes `ecosystem.config.cjs` which tells PM2 how to start the app:
 
+- **`instances: 1`** — a single always-up process; the daily follow-up cron lives in this process and must not be duplicated
 - **`node_args: "-r dotenv/config"`** — preloads dotenv before any module is imported, so `.env.local` is read before `gleaptracker.config.ts` evaluates `process.env.*`
 - **`DOTENV_CONFIG_PATH`** — points dotenv to `.env.local` instead of the default `.env`
 - **`PORT`** — the port Express listens on (must match your Apache `ProxyPass` port)
@@ -434,8 +460,9 @@ gleaptracker/
 ├── .env.local                   # Secrets (gitignored)
 ├── .env.local.example
 ├── src/
-│   ├── server.ts                # Express app entry (routes + morgan)
+│   ├── server.ts                # Express app entry (routes + morgan + cron)
 │   ├── types/config.ts          # Types for gleaptracker.config.ts
+│   ├── jobs/                    # In-process node-cron (daily no-reply follow-up)
 │   ├── handlers/                # Webhook / Slack HTTP handlers
 │   │   ├── gleapWebhook/
 │   │   ├── githubWebhook.ts

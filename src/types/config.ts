@@ -5,16 +5,38 @@ export interface GleapConfig {
   workflowId?: string;
   /** Ticket type used for tracker/release tickets */
   trackerTicketType: string;
-  /** Status IDs that mean a ticket is parked / on hold (used when applying waitingStatus) */
+  /** Legacy parked / on-hold status IDs (On Slack). Not applied on Link to tracker. */
   onSlackStatuses: { BUG: string; INQUIRY: string };
   /** Status value for closed/done tickets */
   doneStatus: string;
-  /** Status value for "waiting for update" (applied to linked tickets) */
+  /** Legacy "Waiting for Update" status — not applied on Link to tracker / Slack sync */
   waitingStatus: string;
   /** Type applied to rejected tickets (legacy; unused in the tracker-SoT flow) */
   inProgressType: string;
   /** Message to the customers who were waiting for the bugfix */
   bugFixedMessage?: string;
+}
+
+/** Parse a numeric env var. Empty/invalid → fallback; explicit `0` is kept. */
+export const parseEnvNumber = (raw: string | undefined, fallback: number): number => {
+  if (raw == null || raw.trim() === "") return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : fallback
+}
+
+export interface FollowUpConfig {
+  /** node-cron expression; default `0 8 * * *` (08:00 every day). Set `off` to disable. */
+  cron: string;
+  /** IANA timezone for the cron expression (default UTC) */
+  timezone: string;
+  /** Days after the last human agent reply with no customer reply before the first nudge */
+  followUpAfterDays: number;
+  /** Days after the last human agent reply with no customer reply before close-no-reply */
+  closeAfterDays: number;
+  /** Customer-visible 3-day (or configured) follow-up text */
+  followUpMessage: string;
+  /** Customer-visible close-no-reply text (sent immediately before DONE) */
+  closeMessage: string;
 }
 
 export interface SlackConfig {
@@ -67,4 +89,6 @@ export interface GleapTrackerConfig {
   linear?: LinearConfig;
   jira?: JiraConfig;
   github?: GitHubConfig;
+  /** Daily no-reply follow-up / close job (node-cron, same PM2 process) */
+  followUp: FollowUpConfig;
 }
