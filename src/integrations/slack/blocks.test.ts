@@ -13,6 +13,7 @@ import {
   buildTrackerRootBlocks,
   formatFixesLine,
   formatRefsLine,
+  trackerStatusBadge,
 } from "./blocks"
 
 const actionIds = (block: { elements: Array<Record<string, unknown>> }): string[] =>
@@ -25,101 +26,118 @@ const headerFromRoot = (blocks: KnownBlock[]): string => {
   return section.text?.text ?? ""
 }
 
-describe("header / Fixes / Refs builders", () => {
+describe("header builders", () => {
   const primary = customerTicket()
   const extra = extraCustomerTicket()
+  const tracker = trackerTicket({ status: "INPROGRESS" })
 
-  it("puts customer bugId, title, and email in the human header — not the tracker", () => {
-    const tracker = trackerTicket()
+  it("puts tracker bugId and title in the header, plus primary customer email", () => {
     const header = buildHeaderText({
+      tracker,
       primary,
       extras: [],
-      trackerBugId: tracker.bugId,
     })
     const titleLine = header.split("\n")[0]
 
-    expect(titleLine).toContain("`#237536`")
-    expect(titleLine).toContain("Orange typo")
-    expect(titleLine).not.toContain("237650")
+    expect(titleLine).toContain("`#237650`")
+    expect(titleLine).toContain("Tracker: Orange typo")
+    expect(titleLine).not.toContain("237536")
     expect(header).toContain("jay@example.com")
-    expect(header).toContain("Jay")
-    expect(header).not.toContain(tracker.title)
+    expect(header).not.toContain("Jay")
     expect(header).not.toContain("tracker@example.com")
   })
 
-  it("always includes Fixes Gleap-<trackerBugId> and Refs Gleap-<customer…>", () => {
+  it("always lists customer tickets as Tickets: links and never Fixes/Refs", () => {
+    const withExtras = buildHeaderText({
+      tracker,
+      primary,
+      extras: [extra],
+    })
+    expect(withExtras).toMatch(
+      /Tickets: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536>, <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-2\|#237537>/,
+    )
+    expect(withExtras).not.toMatch(/Fixes Gleap-/)
+    expect(withExtras).not.toMatch(/Refs Gleap-/)
+    expect(withExtras).not.toMatch(/Linked:/)
+
+    const solo = buildHeaderText({ tracker, primary, extras: [] })
+    expect(solo).toMatch(
+      /Tickets: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-1\|#237536>/,
+    )
+    expect(solo).not.toContain("#237537")
+    expect(solo).not.toMatch(/Fixes Gleap-/)
+    expect(solo).not.toMatch(/Refs Gleap-/)
+  })
+
+  it("renders tracker status as emoji + text, not as a button", () => {
+    expect(trackerStatusBadge("OPEN")).toBe("🔵 Open")
+    expect(trackerStatusBadge("INPROGRESS")).toBe("🟡 In progress")
+    expect(trackerStatusBadge("DONE")).toBe("✅ Closed")
+    expect(trackerStatusBadge("9oyq7h", "Waiting for Update")).toBe(
+      "🟡 Waiting for Update",
+    )
+
+    const open = buildHeaderText({
+      tracker: trackerTicket({ status: "OPEN" }),
+      primary,
+      extras: [],
+    })
+    expect(open).toContain("🔵 Open")
+
+    const inProgress = buildHeaderText({ tracker, primary, extras: [] })
+    expect(inProgress).toContain("🟡 In progress")
+
+    const closed = buildHeaderText({
+      tracker: trackerTicket({ status: "INPROGRESS" }),
+      primary,
+      extras: [],
+      closed: true,
+    })
+    expect(closed).toContain("✅ Closed")
+    expect(closed).not.toContain("🟡")
+  })
+})
+
+describe("commit convention helpers (git only)", () => {
+  it("formats Fixes / Refs lines for commit messages", () => {
     expect(formatFixesLine(237650)).toBe("Fixes Gleap-237650")
     expect(formatRefsLine([237536, 237537])).toBe(
       "Refs Gleap-237536, Gleap-237537",
     )
-
-    const withExtras = buildHeaderText({
-      primary,
-      extras: [extra],
-      trackerBugId: 237650,
-    })
-    expect(withExtras).toContain("`Fixes Gleap-237650`")
-    expect(withExtras).toContain("`Refs Gleap-237536, Gleap-237537`")
-
-    const solo = buildHeaderText({ primary, extras: [], trackerBugId: 237650 })
-    expect(solo).toContain("`Fixes Gleap-237650`")
-    expect(solo).toContain("`Refs Gleap-237536`")
-    expect(solo).not.toContain("Gleap-237537")
-  })
-
-  it("shows Linked: only when there are extra customers beyond the primary", () => {
-    const withExtras = buildHeaderText({
-      primary,
-      extras: [extra],
-      trackerBugId: 237650,
-    })
-    expect(withExtras).toMatch(
-      /Linked: <https:\/\/app\.gleap\.io\/projects\/.+\/bugs\/cust-2\|#237537>/,
-    )
-
-    const solo = buildHeaderText({ primary, extras: [], trackerBugId: 237650 })
-    expect(solo).not.toMatch(/Linked:/)
   })
 })
 
 describe("action row / root blocks", () => {
-  it("includes Close when open and hides it when closed, with tracker status in the row", () => {
+  it("includes Close when open and hides it when closed — no status button", () => {
     const open = buildActionsBlock({
       trackerId: "tracker-1",
       gleapUrl: "https://example.com",
-      status: "OPEN",
       closed: false,
     })
-    expect(actionIds(open)).toEqual([
-      "tracker_status",
-      "close_tracker",
-      "open_gleap",
-    ])
+    expect(actionIds(open)).toEqual(["close_tracker", "open_gleap"])
     expect(open.elements[0]).toMatchObject({
-      action_id: "tracker_status",
-      text: { text: "Open" },
-      value: "tracker-1",
-    })
-    expect(open.elements[1]).toMatchObject({
       action_id: "close_tracker",
       style: "danger",
       text: { text: "Close" },
     })
+    expect(open.elements[1]).toMatchObject({
+      action_id: "open_gleap",
+      url: "https://example.com",
+    })
+    expect(JSON.stringify(open)).not.toContain("tracker_status")
 
     const closed = buildActionsBlock({
       trackerId: "tracker-1",
       gleapUrl: "https://example.com",
-      status: "DONE",
       closed: true,
     })
-    expect(actionIds(closed)).toEqual(["tracker_status", "open_gleap"])
+    expect(actionIds(closed)).toEqual(["open_gleap"])
     expect(closed.elements[0]).toMatchObject({
-      action_id: "tracker_status",
-      text: { text: "✅ Closed" },
+      action_id: "open_gleap",
     })
   })
 
-  it("builds root blocks from the customer header and the closed-state action row", () => {
+  it("builds root blocks from the tracker header and the closed-state action row", () => {
     const tracker = trackerTicket({ status: "DONE" })
     const primary = customerTicket()
     const extras = [extraCustomerTicket()]
@@ -131,17 +149,22 @@ describe("action row / root blocks", () => {
     })
 
     const header = headerFromRoot(blocks)
-    expect(header).toContain("`#237536`")
-    expect(header).toContain("`Fixes Gleap-237650`")
-    expect(header).toContain("`Refs Gleap-237536, Gleap-237537`")
-    expect(header).toMatch(/Linked:/)
+    expect(header).toContain("`#237650`")
+    expect(header).toContain("Tracker: Orange typo")
+    expect(header).toContain("jay@example.com")
+    expect(header).toMatch(/Tickets:.*#237536.*#237537/)
+    expect(header).toContain("✅ Closed")
+    expect(header).not.toMatch(/Fixes Gleap-/)
+    expect(header).not.toMatch(/Refs Gleap-/)
 
     const actions = blocks[1] as { elements: Array<Record<string, unknown>> }
-    expect(actionIds(actions)).not.toContain("close_tracker")
+    expect(actionIds(actions)).toEqual(["open_gleap"])
     expect(actions.elements[0]).toMatchObject({
-      action_id: "tracker_status",
-      text: { text: "✅ Closed" },
+      action_id: "open_gleap",
+      url: "https://app.gleap.io/projects/test-project/for-release/tracker-1",
     })
+    expect(JSON.stringify(blocks)).not.toContain("tracker_status")
+    expect(JSON.stringify(blocks)).not.toMatch(/"type":"button"[^]]*"Open"/)
   })
 })
 

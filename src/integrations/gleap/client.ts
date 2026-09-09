@@ -43,6 +43,8 @@ export interface GleapTicket {
   title: string
   bugId: number
   status: string
+  /** Human-readable Gleap lane name when the API/webhook provides it */
+  statusLabel?: string
   type: string
   trackerTicket: boolean
   plainContent?: string

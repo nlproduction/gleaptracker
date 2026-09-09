@@ -53,7 +53,7 @@ export const refreshTrackerHeader = async (
   await slack.chat.update({
     channel: SLACK_CHANNEL_ID,
     ts: threadTs,
-    text: `#${primary.bugId} ${primary.title}`,
+    text: `#${tracker.bugId} ${tracker.title}`,
     blocks: buildTrackerRootBlocks({ tracker, primary, extras, closed: isClosed }),
   })
 }
@@ -86,7 +86,7 @@ const createTrackerThread = async (
     const extras = extrasFor(primary, customers)
     const msg = await slack.chat.postMessage({
       channel: SLACK_CHANNEL_ID,
-      text: `#${primary.bugId} ${primary.title}`,
+      text: `#${latest.bugId} ${latest.title}`,
       metadata: {
         event_type: "gleap_ticket",
         event_payload: { gleap_ticket_id: tracker.id },
