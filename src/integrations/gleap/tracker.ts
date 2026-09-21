@@ -100,6 +100,17 @@ const processLinkedTickets = async (
 // Core: process a tracker ticket → create issue(s) in configured tracker(s)
 // ---------------------------------------------------------------------------
 
+/** Moves a tracker onto the configured Gleap board (FOR-RELEASE) when its type is wrong. */
+export const ensureTrackerTicketType = async (
+  ticket: Pick<GleapTrackerTicket, "id" | "type">,
+): Promise<void> => {
+  const expected = config.gleap.trackerTicketType
+  if (ticket.type === expected) return
+  await getGleapClient().tickets.update(ticket.id, { type: expected })
+  ticket.type = expected
+  console.log(`[Tracker] Ticket ${ticket.id} type corrected to "${expected}"`)
+}
+
 export const processTrackerTicket = async (ticket: GleapTrackerTicket): Promise<void> => {
   const gleap = getGleapClient()
   const cfg = config
@@ -110,10 +121,7 @@ export const processTrackerTicket = async (ticket: GleapTrackerTicket): Promise<
   }
 
   await withDedup(creatingTrackers, ticket.id, 60_000, async () => {
-    if (ticket.type !== cfg.gleap.trackerTicketType) {
-      await gleap.tickets.update(ticket.id, { type: cfg.gleap.trackerTicketType })
-      console.log(`[Tracker] Ticket ${ticket.id} type corrected to "${cfg.gleap.trackerTicketType}"`)
-    }
+    await ensureTrackerTicketType(ticket)
     const useLinear = cfg.issueTracker === "linear" || cfg.issueTracker === "both"
     const useJira = cfg.issueTracker === "jira" || cfg.issueTracker === "both"
 
