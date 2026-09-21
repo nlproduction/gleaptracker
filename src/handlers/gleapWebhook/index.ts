@@ -2,6 +2,7 @@ import type { Request, Response } from "express"
 import { closeTracker } from "../../integrations/gleap/close"
 import { isTrackerDone, isTrackerTicket } from "../../integrations/gleap/client"
 import { findLinkedTracker } from "../../integrations/gleap/linked"
+import { ensureTrackerTicketType } from "../../integrations/gleap/tracker"
 import { syncTrackerSlack } from "./slack"
 import type { GleapWebhookPayload, GleapWebhookTicket } from "./types"
 
@@ -12,6 +13,7 @@ const corsHeaders = {
 }
 
 const handleTrackerEvent = async (ticket: GleapWebhookTicket): Promise<void> => {
+  await ensureTrackerTicketType(ticket)
   if (isTrackerDone(ticket)) {
     await closeTracker(ticket, { silent: true, source: "gleap" })
     return
