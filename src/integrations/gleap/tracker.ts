@@ -1,164 +1,130 @@
 import config from "../../../gleaptracker.config"
+import { createKeyedLock } from "../../utils/async"
 import { createJiraIssue } from "../jira/client"
 import { createLinearIssue } from "../linear/client"
-import { getGleapClient } from "./client"
+import { getGleapClient, isTrackerDone, isTrackerTicket, linkedTicketId, type GleapTicket } from "./client"
+import { patchTicketFormData } from "./formData"
 
-export interface GleapTrackerTicket {
-  id: string
-  title: string
-  bugId: number
-  type: string
-  trackerTicket: boolean
-  linkedTickets?: string[]
-  formData?: Record<string, unknown>
-}
+export type GleapTrackerTicket = Pick<GleapTicket,
+  "id" | "title" | "bugId" | "type" | "trackerTicket" | "linkedTickets" | "formData" | "plainContent"
+> & { status?: string }
 
-// ---------------------------------------------------------------------------
-// Dedup guards — prevent duplicate issue creation on concurrent webhooks
-// ---------------------------------------------------------------------------
+type Provider = "linear" | "jira"
+interface IssueLink { id: string; identifier: string; url: string }
+const lock = createKeyedLock()
+// Keep successful remote creates if writing their links fails. Recovery is
+// bounded and process-local; it cannot guarantee exactly-once across crashes.
+const pendingLinks = new Map<string, IssueLink>()
+const MAX_PENDING_LINKS = 1_000
 
-const creatingTrackers = new Set<string>()
-const creatingLinked = new Set<string>()
+const fieldsFor = (provider: Provider) => ({
+  identifier: `${provider}IssueId`,
+  url: `${provider}IssueUrl`,
+  id: provider === "linear" ? "linearIssueUuid" : "jiraIssueInternalId",
+})
 
-const withDedup = async (
-  set: Set<string>,
-  id: string,
-  ttlMs: number,
-  fn: () => Promise<void>,
-): Promise<void> => {
-  if (set.has(id)) {
-    console.log(`[Tracker] Already processing ${id} — skipping duplicate`)
-    return
+const readLink = (form: Record<string, unknown> | undefined, provider: Provider): IssueLink | undefined => {
+  const fields = fieldsFor(provider)
+  const identifier = form?.[fields.identifier]
+  if (typeof identifier !== "string" || !identifier) return undefined
+  return {
+    identifier,
+    id: typeof form?.[fields.id] === "string" ? form[fields.id] as string : "",
+    url: typeof form?.[fields.url] === "string" ? form[fields.url] as string : "",
   }
-  set.add(id)
-  setTimeout(() => set.delete(id), ttlMs)
-  await fn()
 }
 
-// ---------------------------------------------------------------------------
-// Linked ticket processing
-// ---------------------------------------------------------------------------
-
-const processLinkedTickets = async (
-  linkedTicketIds: string[],
-  issueIdentifier: string,
-  issueUrl: string,
-) => {
-  const gleap = getGleapClient()
-
-  await Promise.all(
-    linkedTicketIds.map(async (ticketId) => {
-      let ticket: Awaited<ReturnType<typeof gleap.tickets.get>>
-      try {
-        ticket = await gleap.tickets.get(ticketId)
-      } catch (e) {
-        console.error(`[Tracker] Failed to fetch linked ticket ${ticketId}:`, e)
-        return
-      }
-
-      const ops: Promise<unknown>[] = []
-
-      if (ticket.status === "OPEN") {
-        ops.push(
-          gleap.tickets.update(ticket.id, { status: "INPROGRESS" }).then((ok) => {
-            if (ok) console.log(`[Tracker] Linked ticket ${ticket.id} → INPROGRESS ✓`)
-          }),
-        )
-      }
-
-      const formData = ticket.formData as Record<string, unknown> | undefined
-      if (!formData?.issueId && !creatingLinked.has(ticket.id)) {
-        creatingLinked.add(ticket.id)
-        setTimeout(() => creatingLinked.delete(ticket.id), 60_000)
-        ops.push(
-          gleap.messages.addNote(
-            ticket.id,
-            `Created issue ${issueIdentifier}\nURL: ${issueUrl}`,
-          ),
-        )
-        ops.push(
-          gleap.tickets
-            .update(ticket.id, {
-              formData: { issueId: issueIdentifier, issueUrl },
-            })
-            .then((ok) => {
-              if (ok) console.log(`[Tracker] Linked ticket ${ticket.id} updated with issue ✓`)
-            }),
-        )
-      }
-
-      try {
-        await Promise.all(ops)
-      } catch (e) {
-        console.error(`[Tracker] Failed processing linked ticket ${ticket.id}:`, e)
-      }
-    }),
-  )
+const linkPatch = (provider: Provider, link: IssueLink): Record<string, unknown> => {
+  const fields = fieldsFor(provider)
+  return {
+    [fields.identifier]: link.identifier,
+    [fields.url]: link.url,
+    ...(link.id ? { [fields.id]: link.id } : {}),
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Core: process a tracker ticket → create issue(s) in configured tracker(s)
-// ---------------------------------------------------------------------------
+const saveForm = async (ticketId: string, patch: Record<string, unknown>): Promise<void> => {
+  const latest = await getGleapClient().tickets.get(ticketId)
+  if (!await patchTicketFormData(ticketId, latest.formData, patch)) {
+    throw new Error(`[Tracker] Failed to persist issue link on ${ticketId}`)
+  }
+}
 
-/** Moves a tracker onto the configured Gleap board (FOR-RELEASE) when its type is wrong. */
+/** Moves trackers to their configured board; customer ticket types never change. */
 export const ensureTrackerTicketType = async (
   ticket: Pick<GleapTrackerTicket, "id" | "type">,
 ): Promise<void> => {
   const expected = config.gleap.trackerTicketType
   if (ticket.type === expected) return
-  await getGleapClient().tickets.update(ticket.id, { type: expected })
+  if (!await getGleapClient().tickets.update(ticket.id, { type: expected })) {
+    throw new Error(`[Tracker] Failed to correct ticket type for ${ticket.id}`)
+  }
   ticket.type = expected
-  console.log(`[Tracker] Ticket ${ticket.id} type corrected to "${expected}"`)
 }
 
-export const processTrackerTicket = async (ticket: GleapTrackerTicket): Promise<void> => {
-  const gleap = getGleapClient()
-  const cfg = config
-
-  if (!ticket.trackerTicket) {
-    console.log(`[Tracker] Ticket ${ticket.id} skipped — not a tracker ticket`)
-    return
+const ensureIssue = async (ticket: GleapTicket, provider: Provider): Promise<IssueLink> => {
+  const existing = readLink(ticket.formData, provider)
+  if (existing) return existing
+  const key = `${provider}:${ticket.id}`
+  let result = pendingLinks.get(key)
+  if (!result) {
+    result = provider === "linear" ? await createLinearIssue(ticket) : await createJiraIssue(ticket)
+    if (pendingLinks.size >= MAX_PENDING_LINKS) {
+      const oldest = pendingLinks.keys().next().value
+      if (oldest) pendingLinks.delete(oldest)
+    }
+    pendingLinks.set(key, result)
   }
+  const patch = linkPatch(provider, result)
+  await saveForm(ticket.id, patch)
+  ticket.formData = { ...(ticket.formData ?? {}), ...patch }
+  pendingLinks.delete(key)
+  return result
+}
 
-  await withDedup(creatingTrackers, ticket.id, 60_000, async () => {
-    await ensureTrackerTicketType(ticket)
-    const useLinear = cfg.issueTracker === "linear" || cfg.issueTracker === "both"
-    const useJira = cfg.issueTracker === "jira" || cfg.issueTracker === "both"
-
-    if (!useLinear && !useJira) {
-      console.log(`[Tracker] issueTracker is "${cfg.issueTracker}" — not creating Linear/Jira issues`)
-      return
+const syncCustomerLinks = async (
+  tracker: GleapTicket,
+  links: Partial<Record<Provider, IssueLink>>,
+): Promise<void> => {
+  const gleap = getGleapClient()
+  const primary = links.linear ?? links.jira
+  if (!primary) return
+  const ids = new Set((tracker.linkedTickets ?? []).map(linkedTicketId))
+  for (const id of ids) {
+    const customer = await gleap.tickets.get(id)
+    if (isTrackerTicket(customer)) continue
+    const patch: Record<string, unknown> = {}
+    for (const provider of ["linear", "jira"] as const) {
+      const link = links[provider]
+      if (link && !readLink(customer.formData, provider)) Object.assign(patch, linkPatch(provider, link))
     }
-
-    let linearResult: Awaited<ReturnType<typeof createLinearIssue>> | undefined
-    let jiraResult: Awaited<ReturnType<typeof createJiraIssue>> | undefined
-
-    if (useLinear) {
-      linearResult = await createLinearIssue(ticket)
-      await gleap.tickets.update(ticket.id, {
-        formData: {
-          linearIssueId: linearResult.identifier,
-          linearIssueUrl: linearResult.url,
-        },
-      })
-      console.log(`[Tracker] Linear issue ${linearResult.identifier} linked to Gleap ${ticket.id}`)
+    // Older consumers still use the generic pair. Never replace an existing link.
+    if (!customer.formData?.issueId) Object.assign(patch, { issueId: primary.identifier, issueUrl: primary.url })
+    if (Object.keys(patch).length) await saveForm(id, patch)
+    if (customer.status === "OPEN" && !await gleap.tickets.update(id, { status: "INPROGRESS" })) {
+      throw new Error(`[Tracker] Failed to update linked customer ${id}`)
     }
+  }
+}
 
-    if (useJira) {
-      jiraResult = await createJiraIssue(ticket)
-      await gleap.tickets.update(ticket.id, {
-        formData: {
-          jiraIssueId: jiraResult.identifier,
-          jiraIssueUrl: jiraResult.url,
-        },
-      })
-      console.log(`[Tracker] Jira issue ${jiraResult.identifier} linked to Gleap ${ticket.id}`)
+export const processTrackerTicket = async (hint: GleapTrackerTicket): Promise<void> => {
+  if (config.issueTracker === "none" || !isTrackerTicket(hint)) return
+  await lock(hint.id, async () => {
+    // Webhook snapshots can predate our own formData writes.
+    const tracker = await getGleapClient().tickets.get(hint.id)
+    if (!isTrackerTicket(tracker) || isTrackerDone(tracker)) return
+    await ensureTrackerTicketType(tracker)
+    const links: Partial<Record<Provider, IssueLink>> = {}
+    const failures: unknown[] = []
+    for (const provider of ["linear", "jira"] as const) {
+      if (config.issueTracker !== provider && config.issueTracker !== "both") continue
+      try {
+        links[provider] = await ensureIssue(tracker, provider)
+      } catch (error) {
+        failures.push(error)
+      }
     }
-
-    // Use the primary tracker's identifier for linked tickets
-    const primaryResult = linearResult ?? jiraResult
-    if (primaryResult && ticket.linkedTickets?.length) {
-      await processLinkedTickets(ticket.linkedTickets, primaryResult.identifier, primaryResult.url)
-    }
+    await syncCustomerLinks(tracker, links)
+    if (failures.length) throw new AggregateError(failures, "Issue tracker synchronization failed")
   })
 }

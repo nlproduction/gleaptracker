@@ -1,142 +1,91 @@
 import type { Request, Response } from "express"
-import crypto from "crypto"
 import config from "../../gleaptracker.config"
 import { closeTracker } from "../integrations/gleap/close"
 import { findTrackerByBugId } from "../integrations/gleap/linked"
+import { createDeliveryDedup } from "../utils/async"
+import { isRecord, rawBodyToString, trackerBugId, verifyHmac } from "../utils/webhooks"
 
-const recentlyProcessed = new Set<string>()
-const DEDUP_TTL_MS = 30_000
-
+const dedup = createDeliveryDedup()
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, linear-signature",
-}
-
-interface LinearLabel {
-  id: string
-  name: string
-}
-
-interface LinearState {
-  name: string
-  type: string
-}
-
-interface LinearIssueData {
-  id: string
-  title: string
-  state?: LinearState
-  labels?: LinearLabel[]
-}
-
-const verifySignature = (headerSignature: string, rawBody: string): boolean => {
-  if (!headerSignature || !config.linear?.webhookSecret) return false
-  const secret = config.linear.webhookSecret
-  const headerBuf = new Uint8Array(Buffer.from(headerSignature, "hex"))
-  const computed = new Uint8Array(
-    crypto.createHmac("sha256", secret).update(rawBody).digest(),
-  )
-  if (headerBuf.length !== computed.length) return false
-  return crypto.timingSafeEqual(computed, headerBuf)
-}
-
-const processIssueUpdate = async (data: Record<string, unknown>) => {
-  const issue = data as unknown as LinearIssueData
-  const cfg = config.linear
-  if (!cfg) {
-    console.log("[Linear] No Linear config — skipping")
-    return
-  }
-
-  const hasTrackerLabel = issue.labels?.some(
-    (l) => l.name.toLowerCase() === cfg.trackerLabel.toLowerCase(),
-  )
-  if (!hasTrackerLabel) {
-    console.log(`[Linear] Issue ${issue.id} skipped — missing label "${cfg.trackerLabel}"`)
-    return
-  }
-
-  if (issue.state?.type !== "completed") {
-    console.log(
-      `[Linear] Issue ${issue.id} skipped — state type "${issue.state?.type}" is not completed`,
-    )
-    return
-  }
-
-  const bugIdMatch = issue.title?.match(/^\[(\d+)\]/)
-  if (!bugIdMatch) {
-    console.error(
-      `[Linear] Issue ${issue.id} skipped — title has no leading [bugId]: "${issue.title}"`,
-    )
-    return
-  }
-
-  const bugId = bugIdMatch[1]
-  const dedupKey = `${issue.id}:${bugId}`
-  if (recentlyProcessed.has(dedupKey)) {
-    console.log(`[Linear] Duplicate webhook for issue ${issue.id} — skipping`)
-    return
-  }
-  recentlyProcessed.add(dedupKey)
-  setTimeout(() => recentlyProcessed.delete(dedupKey), DEDUP_TTL_MS)
-
-  console.log(`[Linear] Processing done issue ${issue.id}, Gleap bugId: ${bugId}`)
-
-  const tracker = await findTrackerByBugId(bugId)
-  if (!tracker) {
-    console.error(`[Linear] No Gleap tracker ticket found for bugId ${bugId}`)
-    return
-  }
-
-  await closeTracker(tracker, { source: "linear" })
+  "Access-Control-Allow-Headers": "Content-Type, linear-signature, linear-delivery",
 }
 
 export function linearOptions(_req: Request, res: Response): void {
   res.set(corsHeaders).status(200).end()
 }
 
-function rawBodyToString(body: unknown): string {
-  if (Buffer.isBuffer(body)) return body.toString("utf8")
-  if (typeof body === "string") return body
-  return ""
-}
-
 export async function linearPost(req: Request, res: Response): Promise<void> {
   const rawBody = rawBodyToString(req.body)
-  const signature = req.get("linear-signature") || ""
-
-  if (!verifySignature(signature, rawBody)) {
+  const cfg = config.linear
+  if (!verifyHmac(req.get("linear-signature") || "", rawBody, cfg?.webhookSecret)) {
     res.status(401).set(corsHeaders).send("Invalid signature")
     return
   }
-
-  let payload: Record<string, unknown>
+  let payload: unknown
   try {
     payload = JSON.parse(rawBody)
   } catch {
     res.status(400).set(corsHeaders).send("Invalid JSON")
     return
   }
-
-  const { type, action, data } = payload as {
-    type: string
-    action: string
-    data: Record<string, unknown>
+  if (!isRecord(payload)) {
+    res.status(400).set(corsHeaders).send("Invalid payload")
+    return
   }
-
-  if (type !== "Issue" || action !== "update") {
+  // Linear signs a millisecond timestamp inside every webhook payload.
+  if (typeof payload.webhookTimestamp !== "number" || !Number.isFinite(payload.webhookTimestamp) ||
+      Math.abs(Date.now() - payload.webhookTimestamp) > 60_000) {
+    res.status(401).set(corsHeaders).send("Invalid webhook timestamp")
+    return
+  }
+  if (payload.type !== "Issue" || payload.action !== "update") {
     res.status(200).set(corsHeaders).send("Event not tracked")
     return
   }
-
-  try {
-    await processIssueUpdate(data)
-  } catch (e) {
-    console.error("[Linear webhook] Error:", e)
-    res.status(500).set(corsHeaders).json({ error: String(e) })
+  const issue = payload.data
+  if (!isRecord(issue) || typeof issue.id !== "string" || !issue.id || typeof issue.title !== "string") {
+    res.status(400).set(corsHeaders).send("Invalid issue payload")
     return
   }
-
-  res.status(200).set(corsHeaders).end()
+  // Edits to an already-completed issue must not re-close a reopened tracker.
+  if (isRecord(payload.updatedFrom) && !("stateId" in payload.updatedFrom)) {
+    res.status(200).set(corsHeaders).send("No state transition")
+    return
+  }
+  if (!isRecord(issue.state) || issue.state.type !== "completed" ||
+      (cfg?.teamId && typeof issue.teamId === "string" && issue.teamId !== cfg.teamId)) {
+    res.status(200).set(corsHeaders).send("State or team not tracked")
+    return
+  }
+  const bugId = trackerBugId(issue.title, issue.description)
+  if (!bugId) {
+    res.status(200).set(corsHeaders).send("No Gleap tracker reference")
+    return
+  }
+  try {
+    const tracker = await findTrackerByBugId(bugId)
+    if (!tracker) {
+      res.status(200).set(corsHeaders).send("Tracker not found")
+      return
+    }
+    const savedUuid = tracker.formData?.linearIssueUuid
+    const savedIdentifier = tracker.formData?.linearIssueId
+    const linked = savedUuid ? savedUuid === issue.id
+      : savedIdentifier ? savedIdentifier === issue.identifier || savedIdentifier === issue.id
+      : Array.isArray(issue.labels) && issue.labels.some((label) =>
+          isRecord(label) && typeof label.name === "string" &&
+          label.name.toLowerCase() === cfg?.trackerLabel?.toLowerCase())
+    if (!linked) {
+      res.status(200).set(corsHeaders).send("Issue is not linked to this tracker")
+      return
+    }
+    const delivery = req.get("linear-delivery") || `${issue.id}:${issue.updatedAt ?? payload.webhookTimestamp}`
+    await dedup(`linear:${delivery}:${bugId}`, () => closeTracker(tracker, { source: "linear" }))
+    res.status(200).set(corsHeaders).end()
+  } catch (error) {
+    console.error("[Linear webhook] Error:", error)
+    res.status(500).set(corsHeaders).json({ error: "Tracker close failed; retry this delivery" })
+  }
 }
