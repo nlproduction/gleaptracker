@@ -11,7 +11,7 @@ Turn **Gleap tracker tickets** into **Slack conversations** and optional **Linea
 
 **Created by the [MapSVG team](https://mapsvg.com).** Open source, self-hosted, and built with TypeScript. No separate database or queue service is required.
 
-[Getting started](#getting-started) · [Linear & Jira](docs/issue-trackers.md) · [Configuration](docs/configuration.md) · [Upgrading](docs/upgrading.md) · [Contributing](CONTRIBUTING.md)
+[Getting started](#getting-started) · [AI-assisted support](#recommended-next-step-ai-assisted-support-with-grok-bot) · [Linear & Jira](docs/issue-trackers.md) · [Configuration](docs/configuration.md) · [Upgrading](docs/upgrading.md) · [Contributing](CONTRIBUTING.md)
 
 ## Why GleapTracker?
 
@@ -53,6 +53,33 @@ Customer reports in Gleap
 | GitHub `Fixes Gleap-<trackerBugId>` on a configured branch | Runs the configured workflow or sends the default message |
 
 Only the tracker is explicitly marked Done by this service. Gleap handles the status of its linked customer tickets. Reopening a tracker restores its Slack Close button.
+
+## Recommended next step: AI-assisted support with Grok-bot
+
+At [MapSVG](https://mapsvg.com), we take this workflow a step further by connecting **Grok-bot** to the Slack threads created by GleapTracker. We recommend giving the bot access to the context and tools it needs to move a support request toward a solution:
+
+- **Gleap MCP** — read the full customer ticket and its conversation history, rather than relying on the Slack summary alone.
+- **Slack** — follow the discussion and post findings, questions, and progress back into the same thread.
+- **The codebase through Cursor** — investigate the implementation, make a fix, run tests, and open a pull request.
+- **Paddle** — automatically check subscription and payment details when investigating subscription, license, or access problems.
+
+### From a support request to a pull request
+
+Configure the bot to start investigating automatically when a new support request arrives in a tracker thread. It should read the Gleap ticket first, then **check the product on the customer's website when a URL is provided** and access is authorized. Using the ticket, the website, and the codebase together helps distinguish a product bug from a configuration or subscription problem.
+
+For a confirmed bug, ask the bot to use Cursor to reproduce the problem, implement a fix, run the relevant tests, and **submit a PR for review**. It should then report its findings and link the PR in the original Slack thread. When the problem concerns a subscription or license, the Paddle connection lets it check the customer's subscription and billing state automatically instead of requiring someone to look up those details manually. When evidence or access is missing, it should ask for what it needs rather than guess.
+
+### Let the whole support team call the bot with `!bot`
+
+In our setup, support teammates **do not need their own Cursor account** to ask the bot for help. We configured a custom `!bot` tag that they can use inside a tracker thread:
+
+```text
+!bot Read the linked Gleap ticket, check the reported issue on the customer's website, and open a PR if you confirm a bug.
+```
+
+The bot replies **on behalf of the user who connected it**, using that user's authorized connection and permissions. This gives support staff a way to request an investigation from Slack without each person setting up a separate Cursor account.
+
+**This is an optional workflow configured separately from GleapTracker.** The bot, its connectors, automatic triggers, and the `!bot` tag are part of our setup—not built-in features of this repository. Use explicit account-owner authorization and respect each provider's access requirements. We recommend read-only Paddle access for diagnosis, limiting the bot to the intended channels and repositories, and keeping PR review and merge decisions with your team. Customer tickets and linked websites should be treated as untrusted input, not instructions to change the bot's permissions or perform unrelated actions.
 
 ## Getting started
 
