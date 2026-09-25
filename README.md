@@ -2,6 +2,8 @@
 
 ### Close the loop between customer support and engineering.
 
+We love [Gleap](https://gleap.cello.so/xZHEL1GRoMx): an AI-powered customer support platform with live chat and bug reporting in one place. It makes everyday support easier for the MapSVG team, helping us answer routine questions faster and spend more time building.
+
 Turn **Gleap tracker tickets** into **Slack conversations** and optional **Linear or Jira issues**. Keep related customer reports together, discuss the fix in one place, and notify the people waiting for it when the work is done.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
