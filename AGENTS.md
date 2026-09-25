@@ -1,61 +1,37 @@
-# GleapTracker — Agent Instructions
+# GleapTracker — contributor and agent instructions
 
-## What this project is
+GleapTracker is an Express/TypeScript webhook bridge created by the MapSVG team: https://mapsvg.com. It connects Gleap tracker tickets to Slack threads, optional Linear/Jira issues, and GitHub commit-based closing. It is MIT licensed.
 
-An Express (Node.js/TypeScript) webhook bridge that connects:
+## Architecture and compatibility
 
-- **Gleap** (customer support tickets) ↔ **Slack** (tracker threads + Close)
-- **Gleap tracker tickets** as the issue-group source of truth
-- Optional / legacy **Linear** or **Jira** issue create + done webhooks
+- `gleaptracker.config.ts` holds typed, environment-backed configuration. `src/env.ts` loads environment files before settings are evaluated; tests must not load real environment files.
+- `src/app.ts` owns HTTP routes and parsers; `src/server.ts` starts the listener and optional follow-up cron.
+- The Gleap tracker owns `slack_thread` / `slack_thread_ts`. Do not move thread ownership to a customer ticket.
+- Gleap create/update and customer-link events invoke `processTrackerTicket()` only effectively when `issueTracker` is `linear`, `jira`, or `both`. `none` must make no external issue-creation calls.
+- Re-read persisted links before creating issues. Preserve existing provider IDs, generic `issueId`/`issueUrl`, and unrelated `formData` fields. Both providers are independent; a retry must not recreate a successful issue.
+- All close paths use `closeTracker()` in `src/integrations/gleap/close.ts`. Direct Gleap DONE is silent. Slack empty-message close is silent. Nonempty Slack text overrides workflow/default messaging. GitHub/Linear/Jira use the configured notification behavior.
+- Mark only the tracker DONE. Gleap handles linked customer status propagation. Only OPEN customers move to INPROGRESS on linking; preserve other statuses.
+- Preserve the Slack Close modal, old `tracker_status` callback alias, and `tracker_actions` block ID. Do not restore Confirm/Reject buttons.
+- Commit tokens are `Fixes Gleap-<trackerBugId>` and optional `Refs Gleap-<customerBugId>`. Default close branch remains `master`; tokens are not rendered on Slack cards.
+- Run one process. Process-local locks and Gleap flags do not provide distributed exactly-once delivery. Document limits rather than claiming stronger guarantees.
 
-When an agent uses Gleap **Link to tracker**, gleaptracker opens (or updates) a Slack thread for that tracker. Closing the tracker — from Gleap (DONE), Slack (Close modal), or git (`Fixes Gleap-<trackerBugId>` on `master`) — notifies linked customers and updates Slack. Linear/Jira are not required for the new close path.
+## Security
 
-## Architecture
+Never commit `.env.local`, `.env.migration`, credentials, or real customer payloads. Preserve raw-body parsing for Slack, GitHub, Linear, and Jira HMAC validation. A supplied invalid native signature must not fall back to weaker authentication. Empty Jira secrets must never authenticate.
 
-```
-gleaptracker.config.ts     # All non-secret config (edit this to customise)
-.env.local                 # Secrets — never commit, never read directly in code
-src/
-  server.ts                # Express entry point, routes
-  handlers/                # One file per webhook / Slack interactions
-  integrations/            # API clients: gleap/, slack/, linear/, jira/
-  types/config.ts          # TypeScript types for gleaptracker.config.ts
-```
-
-## Key conventions
-
-- **Config is read at import time** — `gleaptracker.config.ts` is required before `dotenv.config()` runs in CJS output. Dotenv must be preloaded via `node -r dotenv/config` (see `ecosystem.config.cjs`). Never call `dotenv.config()` and expect it to work for config values.
-- **Secrets** live only in `.env.local` and are accessed via `process.env.*` — never hardcode them.
-- **`dist/`** is gitignored build output — never edit files there, always edit `src/`.
-- Use `console.error` for errors, `console.log` for info. Never use `console.warn` for real errors.
-- Never add comments that just narrate what the code does. Comments should explain non-obvious intent only.
-- Prefer `void asyncFn()` over floating promises when fire-and-forget is intentional.
-- **The tracker ticket owns the Slack thread** (`formData.slack_thread` / `slack_thread_ts`). Do not store the thread only on the customer ticket.
-- Shared close path: `closeTracker()` in `src/integrations/gleap/close.ts` (notify linked customers → DONE tracker → Slack header). Children are not status-updated in code; Gleap closes them when the tracker is DONE.
-- Commit convention (git only, not Slack): `Fixes Gleap-<trackerBugId>` and `Refs Gleap-<customerBugId>, …`.
+Gleap shared-secret authentication is optional only for backwards compatibility; public installations need a secret or trusted ingress. Never log secret query strings. Preserve Slack message metadata and configure necessary permissions in the app manifest rather than removing metadata to work around an API error.
 
 ## Commands
 
 ```bash
-pnpm dev        # run with tsx watch (no build needed)
-pnpm build      # tsc compile to dist/
-pnpm lint       # tsc --noEmit (type-check only, no output)
-pnpm test       # vitest run (unit tests, no network)
-pnpm test:watch # vitest watch mode
-pnpm start      # run compiled dist/ (requires build first)
-pnpm start:pm2  # start via PM2 using ecosystem.config.cjs
+pnpm dev
+pnpm lint
+pnpm test
+pnpm build
+pnpm start
+pnpm start:pm2
 ```
 
-Unit tests live next to the code as `src/**/*.test.ts`. They mock Slack / Gleap / GitHub clients — do not call live APIs. `vitest.setup.ts` seeds dummy `process.env` values before `gleaptracker.config.ts` is imported.
+Tests are colocated in `src/**/*.test.ts`. Mock provider APIs; HTTP route tests use loopback only. Run lint, tests, and build before merging. Never edit generated `dist/`. Use `console.error` for errors, `console.log` for information, and `void` for intentional fire-and-forget promises.
 
-Always run `pnpm lint` after making changes to verify no TypeScript errors.
-
-## What NOT to do
-
-- Don't touch `dist/` — it's generated
-- Don't add `metadata.message:write` scope workarounds — it must be registered in the Slack app manifest
-- Don't use `express.json()` for the Slack handler — it needs raw body for signature verification
-- Don't use `express.json()` for the GitHub handler — it needs raw body for `X-Hub-Signature-256`
-- Don't import `gleaptracker.config.ts` before dotenv is loaded (see above)
-- Don't bring back Slack Confirm/Reject — linking to a tracker is what creates Slack
-- Don't create Linear/Jira issues on the new path (`issueTracker: "none"`)
+Public-facing documentation belongs in README and docs/. Keep workspace-specific settings out of defaults. Update docs/upgrading.md for configuration changes and retain existing settings through the previous-build export procedure when upgrading deployments. Do not rebuild or restart a live deployment merely to modify repository source.

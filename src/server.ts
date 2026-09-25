@@ -1,45 +1,16 @@
-import dotenv from "dotenv"
-import express from "express"
-import morgan from "morgan"
-import { githubOptions, githubPost } from "./handlers/githubWebhook"
-import { gleapOptions, gleapPost } from "./handlers/gleapWebhook"
-import { jiraOptions, jiraPost } from "./handlers/jiraWebhook"
-import { linearOptions, linearPost } from "./handlers/linearWebhook"
-import { slackOptions, slackPost } from "./handlers/slack"
+import "./env"
+import config from "../gleaptracker.config"
+import { createApp } from "./app"
 import { startFollowUpCron } from "./jobs/followUp"
 
-dotenv.config({ path: ".env.local" })
-dotenv.config()
-
-const app = express()
 const PORT = Number(process.env.PORT) || 3000
-
-app.use(morgan(":date[iso] :method :url :status", { immediate: true }))
-
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "gleaptracker" })
-})
-
-const rawBody = express.raw({ type: "*/*", limit: "5mb" })
-const jsonBody = express.json({ limit: "2mb" })
-
-app.options("/api/slack", slackOptions)
-app.post("/api/slack", rawBody, (req, res) => void slackPost(req, res))
-
-app.options("/api/webhooks/linear", linearOptions)
-app.post("/api/webhooks/linear", rawBody, (req, res) => void linearPost(req, res))
-
-app.options("/api/webhooks/gleap", gleapOptions)
-app.post("/api/webhooks/gleap", jsonBody, (req, res) => void gleapPost(req, res))
-
-app.options("/api/webhooks/jira", jiraOptions)
-app.post("/api/webhooks/jira", jsonBody, (req, res) => void jiraPost(req, res))
-
-app.options("/api/webhooks/github", githubOptions)
-app.post("/api/webhooks/github", rawBody, (req, res) => void githubPost(req, res))
+const app = createApp()
 
 app.listen(PORT, () => {
   console.log(`GleapTracker listening on http://localhost:${PORT}`)
+  if (!config.gleap.webhookSecret) {
+    console.log("[Security] Gleap webhook has no shared secret. Restrict ingress or configure GLEAP_WEBHOOK_SECRET before exposing it publicly.")
+  }
   startFollowUpCron()
 })
 

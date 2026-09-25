@@ -2,6 +2,24 @@
   "name": "gleaptracker",
   "version": "0.1.0",
   "private": true,
+  "description": "Connect Gleap customer support with Slack, Linear, Jira, and GitHub. Created by the MapSVG team.",
+  "license": "MIT",
+  "author": {
+    "name": "MapSVG team",
+    "url": "https://mapsvg.com"
+  },
+  "homepage": "https://github.com/nlproduction/gleaptracker#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nlproduction/gleaptracker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nlproduction/gleaptracker/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@9.10.0",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
@@ -9,6 +27,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "config:export-previous": "node scripts/export-config.cjs",
     "start:pm2": "pm2 start ecosystem.config.cjs",
     "stop:pm2": "pm2 stop gleaptracker",
     "reload:pm2": "pm2 reload gleaptracker --update-env",
@@ -19,10 +38,10 @@
   },
   "dependencies": {
     "@linear/sdk": "^81.0.0",
-    "@slack/web-api": "^7.15.0",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "morgan": "^1.10.0",
+    "@slack/web-api": "^7.19.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.3",
+    "morgan": "^1.12.1",
     "node-cron": "^4.6.0"
   },
   "devDependencies": {
@@ -34,6 +53,8 @@
     "vitest": "^5.0.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

@@ -1,10 +1,12 @@
 import type { Request, Response } from "express"
+import config from "../../../gleaptracker.config"
 import { closeTracker } from "../../integrations/gleap/close"
 import { isTrackerDone, isTrackerTicket } from "../../integrations/gleap/client"
 import { findLinkedTracker } from "../../integrations/gleap/linked"
-import { ensureTrackerTicketType } from "../../integrations/gleap/tracker"
+import { ensureTrackerTicketType, processTrackerTicket } from "../../integrations/gleap/tracker"
+import { isRecord, verifySharedSecret } from "../../utils/webhooks"
 import { syncTrackerSlack } from "./slack"
-import type { GleapWebhookPayload, GleapWebhookTicket } from "./types"
+import type { GleapWebhookTicket } from "./types"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,29 +14,29 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 }
 
-const handleTrackerEvent = async (ticket: GleapWebhookTicket): Promise<void> => {
-  await ensureTrackerTicketType(ticket)
-  if (isTrackerDone(ticket)) {
-    await closeTracker(ticket, { silent: true, source: "gleap" })
-    return
+const syncActiveTracker = async (ticket: GleapWebhookTicket, triggerTicketId?: string): Promise<void> => {
+  // Keep Slack usable when an optional provider is temporarily unavailable.
+  try {
+    await processTrackerTicket(ticket)
+  } finally {
+    if (triggerTicketId) await syncTrackerSlack(ticket, { triggerTicketId })
+    else await syncTrackerSlack(ticket)
   }
-  await syncTrackerSlack(ticket)
-}
-
-const handleCustomerEvent = async (ticket: GleapWebhookTicket): Promise<void> => {
-  const tracker = await findLinkedTracker(ticket)
-  if (!tracker) {
-    console.log(
-      `[Gleap] Ticket ${ticket.id} has no linked tracker — Slack is created on Link to tracker`,
-    )
-    return
-  }
-  await syncTrackerSlack(tracker, { triggerTicketId: ticket.id })
 }
 
 const handleTicket = async (ticket: GleapWebhookTicket): Promise<void> => {
-  if (isTrackerTicket(ticket)) return handleTrackerEvent(ticket)
-  return handleCustomerEvent(ticket)
+  if (isTrackerTicket(ticket)) {
+    await ensureTrackerTicketType(ticket)
+    if (isTrackerDone(ticket)) {
+      await closeTracker(ticket, { silent: true, source: "gleap" })
+      return
+    }
+    await syncActiveTracker(ticket)
+    return
+  }
+  const tracker = await findLinkedTracker(ticket)
+  if (!tracker) return
+  await syncActiveTracker(tracker, ticket.id)
 }
 
 export function gleapOptions(_req: Request, res: Response): void {
@@ -42,37 +44,34 @@ export function gleapOptions(_req: Request, res: Response): void {
 }
 
 export async function gleapPost(req: Request, res: Response): Promise<void> {
-  let payload: GleapWebhookPayload
-  try {
-    payload = req.body as GleapWebhookPayload
-  } catch {
-    res.status(400).set(corsHeaders).send("Invalid JSON")
-    return
-  }
-
-  const { event, data: ticket } = payload
-
-  try {
-    console.log(
-      `[Gleap webhook] ${event} — ticket ${ticket?.id} (bugId: ${ticket?.bugId})`,
-    )
-
-    if (!ticket) {
-      console.error("[Gleap webhook] Payload missing 'data' field — skipping")
-      res.status(200).set(corsHeaders).end()
+  if (config.gleap.webhookSecret) {
+    const authorization = req.get("Authorization") || ""
+    const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : req.query?.secret
+    if (!verifySharedSecret(supplied, config.gleap.webhookSecret)) {
+      res.status(401).set(corsHeaders).send("Invalid webhook authentication")
       return
     }
-
-    if (event === "ticket.created" || event === "ticket.updated") {
-      await handleTicket(ticket)
-    } else {
-      console.log(`[Gleap webhook] Event "${event}" not handled`)
-    }
-  } catch (e) {
-    console.error("[Gleap webhook] Error:", e)
-    res.status(500).set(corsHeaders).json({ error: String(e) })
+  }
+  const payload: unknown = req.body
+  if (!isRecord(payload)) {
+    res.status(400).set(corsHeaders).send("Invalid payload")
     return
   }
-
-  res.status(200).set(corsHeaders).end()
+  if (payload.event !== "ticket.created" && payload.event !== "ticket.updated") {
+    res.status(200).set(corsHeaders).send("Event not tracked")
+    return
+  }
+  if (!isRecord(payload.data) || typeof payload.data.id !== "string" || !payload.data.id ||
+      typeof payload.data.type !== "string" || typeof payload.data.title !== "string" ||
+      typeof payload.data.bugId !== "number") {
+    res.status(400).set(corsHeaders).send("Invalid ticket payload")
+    return
+  }
+  try {
+    await handleTicket(payload.data as unknown as GleapWebhookTicket)
+    res.status(200).set(corsHeaders).end()
+  } catch (error) {
+    console.error("[Gleap webhook] Error:", error)
+    res.status(500).set(corsHeaders).json({ error: "Tracker synchronization failed; retry this delivery" })
+  }
 }

@@ -2,89 +2,14 @@ import type { Request, Response } from "express"
 import config from "../../gleaptracker.config"
 import { closeTracker } from "../integrations/gleap/close"
 import { findTrackerByBugId } from "../integrations/gleap/linked"
+import { createDeliveryDedup } from "../utils/async"
+import { isRecord, rawBodyToString, trackerBugId, verifyHmac, verifySharedSecret } from "../utils/webhooks"
 
-const recentlyProcessed = new Set<string>()
-const DEDUP_TTL_MS = 30_000
-
+const dedup = createDeliveryDedup()
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-}
-
-interface JiraIssueWebhookPayload {
-  webhookEvent: string
-  issue: {
-    id: string
-    key: string
-    fields: {
-      summary: string
-      status: {
-        name: string
-      }
-    }
-  }
-  changelog?: {
-    items: Array<{
-      field: string
-      fromString: string
-      toString: string
-    }>
-  }
-}
-
-const verifySecret = (req: Request): boolean => {
-  const secret = (req.query.secret as string) || ""
-  return secret === (config.jira?.webhookSecret || "")
-}
-
-const processJiraIssueUpdate = async (payload: JiraIssueWebhookPayload) => {
-  const { issue, changelog } = payload
-  const cfg = config.jira
-  if (!cfg) {
-    console.log("[Jira] No Jira config — skipping")
-    return
-  }
-
-  const statusChange = changelog?.items.find((item) => item.field === "status")
-  if (!statusChange) {
-    console.log(`[Jira] Issue ${issue.key} — no status change in changelog, skipping`)
-    return
-  }
-
-  if (statusChange.toString !== cfg.doneStatusName) {
-    console.log(
-      `[Jira] Issue ${issue.key} — status changed to "${statusChange.toString}", not "${cfg.doneStatusName}", skipping`,
-    )
-    return
-  }
-
-  const bugIdMatch = issue.fields.summary?.match(/^\[(\d+)\]/)
-  if (!bugIdMatch) {
-    console.error(
-      `[Jira] Issue ${issue.key} skipped — summary has no leading [bugId]: "${issue.fields.summary}"`,
-    )
-    return
-  }
-
-  const bugId = bugIdMatch[1]
-  const dedupKey = `${issue.key}:${bugId}`
-  if (recentlyProcessed.has(dedupKey)) {
-    console.log(`[Jira] Duplicate webhook for issue ${issue.key} — skipping`)
-    return
-  }
-  recentlyProcessed.add(dedupKey)
-  setTimeout(() => recentlyProcessed.delete(dedupKey), DEDUP_TTL_MS)
-
-  console.log(`[Jira] Processing done issue ${issue.key}, Gleap bugId: ${bugId}`)
-
-  const tracker = await findTrackerByBugId(bugId)
-  if (!tracker) {
-    console.error(`[Jira] No Gleap tracker ticket found for bugId ${bugId}`)
-    return
-  }
-
-  await closeTracker(tracker, { source: "jira" })
+  "Access-Control-Allow-Headers": "Content-Type, X-Hub-Signature, X-Gleaptracker-Secret",
 }
 
 export function jiraOptions(_req: Request, res: Response): void {
@@ -92,33 +17,77 @@ export function jiraOptions(_req: Request, res: Response): void {
 }
 
 export async function jiraPost(req: Request, res: Response): Promise<void> {
-  if (!verifySecret(req)) {
-    res.status(401).set(corsHeaders).send("Invalid secret")
+  const cfg = config.jira
+  const rawBody = rawBodyToString(req.body)
+  const signature = req.get("X-Hub-Signature")
+  // A bad native signature can never downgrade to legacy shared-secret auth.
+  const authenticated = signature !== undefined
+    ? signature.startsWith("sha256=") && !!rawBody && verifyHmac(signature.slice(7), rawBody, cfg?.webhookSecret)
+    : verifySharedSecret(req.get("X-Gleaptracker-Secret") || req.query?.secret, cfg?.webhookSecret)
+  if (!authenticated) {
+    res.status(401).set(corsHeaders).send("Invalid webhook authentication")
     return
   }
-
-  let payload: JiraIssueWebhookPayload
+  let payload: unknown
   try {
-    payload = req.body as JiraIssueWebhookPayload
+    payload = rawBody ? JSON.parse(rawBody) : req.body
   } catch {
     res.status(400).set(corsHeaders).send("Invalid JSON")
     return
   }
-
-  console.log(`[Jira webhook] ${payload.webhookEvent} — issue ${payload.issue?.key}`)
-
+  if (!isRecord(payload)) {
+    res.status(400).set(corsHeaders).send("Invalid payload")
+    return
+  }
   if (payload.webhookEvent !== "jira:issue_updated") {
     res.status(200).set(corsHeaders).send("Event not tracked")
     return
   }
-
-  try {
-    await processJiraIssueUpdate(payload)
-  } catch (e) {
-    console.error("[Jira webhook] Error:", e)
-    res.status(500).set(corsHeaders).json({ error: String(e) })
+  const issue = payload.issue
+  if (!isRecord(issue) || typeof issue.key !== "string" || !isRecord(issue.fields) ||
+      typeof issue.fields.summary !== "string" || !isRecord(payload.changelog) ||
+      !Array.isArray(payload.changelog.items)) {
+    res.status(400).set(corsHeaders).send("Invalid issue or changelog payload")
     return
   }
-
-  res.status(200).set(corsHeaders).end()
+  const statusChange = payload.changelog.items.find((item) => isRecord(item) && item.field === "status")
+  const doneNames = cfg?.doneStatusNames?.length ? cfg.doneStatusNames : [cfg?.doneStatusName]
+  if (!isRecord(statusChange) || typeof statusChange.toString !== "string" ||
+      !doneNames.includes(statusChange["toString"] as unknown as string) || statusChange.fromString === statusChange.toString) {
+    res.status(200).set(corsHeaders).send("No completed status transition")
+    return
+  }
+  const projectKey = isRecord(issue.fields.project) ? issue.fields.project.key : issue.key.split("-")[0]
+  if (cfg?.projectKey && projectKey !== cfg.projectKey) {
+    res.status(200).set(corsHeaders).send("Project not tracked")
+    return
+  }
+  const bugId = trackerBugId(issue.fields.summary, issue.fields.description) ??
+    (Array.isArray(issue.fields.labels)
+      ? issue.fields.labels.find((label): label is string => typeof label === "string" && /^gleap-\d+$/.test(label))?.slice(6)
+      : undefined)
+  if (!bugId) {
+    res.status(200).set(corsHeaders).send("No Gleap tracker reference")
+    return
+  }
+  try {
+    const tracker = await findTrackerByBugId(bugId)
+    if (!tracker) {
+      res.status(200).set(corsHeaders).send("Tracker not found")
+      return
+    }
+    const savedId = tracker.formData?.jiraIssueInternalId
+    const savedKey = tracker.formData?.jiraIssueId
+    if ((savedId && String(savedId) !== String(issue.id)) || (savedKey && savedKey !== issue.key)) {
+      res.status(200).set(corsHeaders).send("Issue is not linked to this tracker")
+      return
+    }
+    const delivery = req.get("X-Atlassian-Webhook-Identifier") ||
+      `${issue.key}:${payload.changelog.id ?? payload.timestamp ?? issue.fields.updated ?? "done"}`
+    await dedup(`jira:${delivery}:${bugId}`, () => closeTracker(tracker, { source: "jira" }))
+    res.status(200).set(corsHeaders).end()
+  } catch (error) {
+    console.error("[Jira webhook] Error:", error)
+    res.status(500).set(corsHeaders).json({ error: "Tracker close failed; retry this delivery" })
+  }
 }

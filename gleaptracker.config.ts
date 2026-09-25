@@ -1,118 +1,66 @@
-/**
- * GleapTracker configuration
- *
- * This file controls all non-secret settings for the integration.
- * Secrets (API keys, tokens) belong in .env.local — see .env.local.example.
- *
- * Fields that reference process.env must be set in .env.local.
- */
-import { parseEnvNumber, type GleapTrackerConfig } from "./src/types/config";
+import "./src/env"
+import { parseEnvList, parseEnvNumber, type GleapTrackerConfig } from "./src/types/config"
 
+const issueTracker = process.env.ISSUE_TRACKER || "none"
+if (!["none", "linear", "jira", "both"].includes(issueTracker)) {
+  throw new Error("ISSUE_TRACKER must be none, linear, jira, or both")
+}
+
+/** Non-secret settings can be customized here; credentials belong in .env.local. */
 const config: GleapTrackerConfig = {
-  // -------------------------------------------------------------------------
-  // Gleap
-  // -------------------------------------------------------------------------
   gleap: {
-    projectId: process.env.GLEAP_PROJECT_ID!,
-    /** Ticket type for "for release" tracker tickets */
-    trackerTicketType: "FOR-RELEASE",
-    /** Legacy: type applied when Slack Reject was used (unused in the tracker-SoT flow) */
+    projectId: process.env.GLEAP_PROJECT_ID || "",
+    trackerTicketType: process.env.GLEAP_TRACKER_TICKET_TYPE || "FOR-RELEASE",
+    doneStatus: process.env.GLEAP_DONE_STATUS || "DONE",
     inProgressType: "INPROGRESS",
-    /** Status value Gleap uses for closed/done tickets */
-    doneStatus: "DONE",
-
-    /** SEE README.md on how to get custom status IDs from Gleap */
-    /** Legacy On Slack lanes — not applied on Link to tracker; cron may still ignore them */
-    onSlackStatuses: { BUG: "cz2qz", INQUIRY: "lm7lx3" },
-    /** Legacy Waiting for Update — not applied on Link to tracker / Slack sync */
-    waitingStatus: "9oyq7h",
-
-    /** Optional: Workflow run on linked tickets when the tracker issue is marked Done */
-    // workflowId: "your-gleap-workflow-id",
-
-    /**
-     * Optional: Message to the customers who were waiting for the bugfix
-     * It's recommended to use either the bugFixedMessage or a workflowId
-     */
-    bugFixedMessage: `Thank you for your patience. We've fixed the bug and released a new version. Please update the plugin.
-
-We're closing the ticket. Feel free to reply to reopen it if the issue persists. If you have any other questions, please open a new ticket 🙂`,
+    onSlackStatuses: {
+      BUG: process.env.GLEAP_ON_SLACK_BUG_STATUS || "",
+      INQUIRY: process.env.GLEAP_ON_SLACK_INQUIRY_STATUS || "",
+    },
+    waitingStatus: process.env.GLEAP_WAITING_STATUS || "",
+    workflowId: process.env.GLEAP_CLOSE_WORKFLOW_ID || undefined,
+    webhookSecret: process.env.GLEAP_WEBHOOK_SECRET || undefined,
+    bugFixedMessage: process.env.GLEAP_BUG_FIXED_MESSAGE ??
+      "Thank you for your patience. This issue has been resolved. We're closing this ticket, but you can reply to reopen it if you still need help.",
   },
-
-  // -------------------------------------------------------------------------
-  // Daily no-reply follow-up / close (node-cron in the Express/PM2 process)
-  // Decides *when* to act (tracker skip + human-agent clock); Gleap workflows
-  // own customer messaging / status. Keep those workflows on trigger "none"
-  // (live, not auto) so only this cron fires them. FOLLOWUP_CRON=off disables.
-  // -------------------------------------------------------------------------
+  slack: {
+    channelId: process.env.SLACK_CHANNEL_ID || "",
+  },
+  issueTracker: issueTracker as GleapTrackerConfig["issueTracker"],
+  github: {
+    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || "",
+    // Preserve the original release branch; opt into main or other branches explicitly.
+    closeBranches: parseEnvList(process.env.GITHUB_CLOSE_BRANCHES, ["master"]),
+  },
+  linear: {
+    teamId: process.env.LINEAR_TEAM_ID || "",
+    labelIds: parseEnvList(process.env.LINEAR_LABEL_IDS),
+    stateId: process.env.LINEAR_STATE_ID || "",
+    trackerLabel: process.env.LINEAR_TRACKER_LABEL || "gleap-tracker-ticket",
+    webhookSecret: process.env.LINEAR_WEBHOOK_SECRET || "",
+  },
+  jira: {
+    host: process.env.JIRA_HOST || "",
+    projectKey: process.env.JIRA_PROJECT_KEY || "",
+    issueType: process.env.JIRA_ISSUE_TYPE || "Bug",
+    doneStatusName: process.env.JIRA_DONE_STATUS || "Done",
+    doneStatusNames: parseEnvList(process.env.JIRA_DONE_STATUSES),
+    webhookSecret: process.env.JIRA_WEBHOOK_SECRET || "",
+    labels: parseEnvList(process.env.JIRA_LABELS),
+    // Projects requiring extra fields can configure them here, for example:
+    // additionalFields: { customfield_10001: "value", priority: { name: "Medium" } },
+  },
   followUp: {
     cron: process.env.FOLLOWUP_CRON || "0 8 * * *",
     timezone: process.env.FOLLOWUP_TZ || "UTC",
     followUpAfterDays: parseEnvNumber(process.env.FOLLOWUP_AFTER_DAYS, 3),
     closeAfterDays: parseEnvNumber(process.env.FOLLOWUP_CLOSE_AFTER_DAYS, 7),
     workflows: {
-      bugFollowUp:
-        process.env.FOLLOWUP_BUG_FOLLOWUP_WORKFLOW_ID || "66d638ab459ae610a55b625c",
-      bugClose:
-        process.env.FOLLOWUP_BUG_CLOSE_WORKFLOW_ID || "66d639db15f03a3715a1c4a7",
-      inquiryClose:
-        process.env.FOLLOWUP_INQUIRY_CLOSE_WORKFLOW_ID || "68942e98c7b00a2ffbb28be2",
+      bugFollowUp: process.env.FOLLOWUP_BUG_FOLLOWUP_WORKFLOW_ID || "",
+      bugClose: process.env.FOLLOWUP_BUG_CLOSE_WORKFLOW_ID || "",
+      inquiryClose: process.env.FOLLOWUP_INQUIRY_CLOSE_WORKFLOW_ID || "",
     },
-    // Unused by the cron (workflows own the copy). Left as a reference.
-    followUpMessage: `Just checking in — do you have any updates on this?
-
-If we don't hear back, we'll close the ticket. Reply anytime and we'll pick it up.`,
-    closeMessage: `Since we haven't heard back, we're closing this ticket. Feel free to reply to reopen it if you still need help. If you have any other questions, please open a new ticket 🙂`,
   },
+}
 
-  // -------------------------------------------------------------------------
-  // Slack
-  // -------------------------------------------------------------------------
-  slack: {
-    channelId: process.env.SLACK_CHANNEL_ID!,
-  },
-
-  // -------------------------------------------------------------------------
-  // Issue tracker selection
-  // "none" (tracker-SoT; no Linear/Jira create) | "linear" | "jira" | "both"
-  // -------------------------------------------------------------------------
-  issueTracker: "none",
-
-  // -------------------------------------------------------------------------
-  // GitHub (Fixes Gleap-<trackerBugId> on push)
-  // -------------------------------------------------------------------------
-  github: {
-    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || "",
-    closeBranches: ["master"],
-  },
-
-  // -------------------------------------------------------------------------
-  // Linear (required when issueTracker is "linear" or "both")
-  // -------------------------------------------------------------------------
-  linear: {
-    teamId: "2fae8c28-5255-4e47-8f4d-00bee3fb118a",
-    /** Label IDs applied to every created issue */
-    labelIds: [
-      "6eba01d2-186e-4e8a-8b79-170f9abebeb4",
-      "cacec15c-04c1-4b0f-9d7d-626b78b19246",
-    ],
-    /** Workflow state ID for newly created issues (e.g. "Todo" / unstarted) */
-    stateId: "f5cfd3be-1b9b-490a-b044-4cfd294ec040",
-    /** Label name on Linear issues used to identify Gleap-linked ones */
-    trackerLabel: "gleap-tracker-ticket",
-    webhookSecret: process.env.LINEAR_WEBHOOK_SECRET!,
-  },
-
-  // -------------------------------------------------------------------------
-  // Jira (required when issueTracker is "jira" or "both")
-  // -------------------------------------------------------------------------
-  jira: {
-    host: process.env.JIRA_HOST!,
-    projectKey: process.env.JIRA_PROJECT_KEY!,
-    issueType: "Bug",
-    doneStatusName: "Done",
-    webhookSecret: process.env.JIRA_WEBHOOK_SECRET!,
-  },
-};
-
-export default config;
+export default config

@@ -385,9 +385,9 @@ describe("startFollowUpCron", () => {
     expect(config.followUp.followUpAfterDays).toBe(3)
     expect(config.followUp.closeAfterDays).toBe(7)
     expect(config.followUp.workflows).toEqual({
-      bugFollowUp: "66d638ab459ae610a55b625c",
-      bugClose: "66d639db15f03a3715a1c4a7",
-      inquiryClose: "68942e98c7b00a2ffbb28be2",
+      bugFollowUp: "test-bug-followup",
+      bugClose: "test-bug-close",
+      inquiryClose: "test-inquiry-close",
     })
   })
 })
