@@ -74,3 +74,16 @@ Run a single process. Missing workflow IDs prevent scheduling and produce a conf
 | POST | `/api/webhooks/jira` | Raw JSON; native Jira signature or legacy shared secret |
 
 The application omits query strings from access logs. Configure the same policy on your HTTPS proxy when using legacy secret URLs. Keep `/health` available to monitoring without including configuration or credentials in the response.
+
+## Slack metadata registration
+
+Register the service's existing event type in your Slack app manifest. Merge this section rather than replacing the rest of the manifest:
+
+```yaml
+metadata:
+  event_subscriptions:
+    - event_type: gleap_ticket
+      schema: {}
+```
+
+The message payload contains `gleap_ticket_id`, which identifies the **tracker**, not a customer ticket. Save the manifest and reinstall the app when Slack requests it. Unregistered metadata may be discarded with a warning; a Slack card can appear normal while `g:note` cannot find its tracker. See Slack's [metadata registration documentation](https://docs.slack.dev/messaging/message-metadata/#app-manifest-configuration).

@@ -4,6 +4,14 @@ const path = require("node:path")
 require("dotenv").config({ path: process.env.DOTENV_CONFIG_PATH || ".env.local" })
 require("dotenv").config()
 
+function quoteEnv(value) {
+  const text = String(value)
+  for (const quote of ["'", "`", '"']) {
+    if (!text.includes(quote) && (quote !== '"' || !text.includes("\\"))) return quote + text + quote
+  }
+  throw new Error("A setting contains incompatible quotes. Preserve it in gleaptracker.config.ts; no export was written.")
+}
+
 try {
   const source = path.resolve(process.argv[2] || "dist/gleaptracker.config.js")
   const output = path.resolve(process.argv[3] || ".env.migration")
@@ -38,7 +46,7 @@ try {
   }
   const lines = Object.entries(values)
     .filter(([, value]) => value !== undefined && value !== null)
-    .map(([key, value]) => `${key}=${JSON.stringify(String(value))}`)
+    .map(([key, value]) => `${key}=${quoteEnv(value)}`)
   fs.writeFileSync(output, "# Previous non-secret settings. Review and merge into .env.local.\n" + lines.join("\n") + "\n", { flag: "wx", mode: 0o600 })
   console.log(`Exported ${lines.length} non-secret settings to ${output}. Existing environment and running services were not changed.`)
 } catch (error) {

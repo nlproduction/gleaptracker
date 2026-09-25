@@ -40,3 +40,8 @@ describe("previous configuration export", () => {
     expect(() => execFileSync(process.execPath, [script, path.join(directory, "missing.cjs")], { cwd: directory, stdio: "pipe" })).toThrow()
   })
 })
+
+it("preserves quotes and literal backslashes in previous customer copy", () => {
+  const message = "We've fixed \"checkout\".\nPath: C:\\new\\release"
+  expect(dotenv.parse(run(message).content).GLEAP_BUG_FIXED_MESSAGE).toBe(message)
+})

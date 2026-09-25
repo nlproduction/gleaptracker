@@ -282,6 +282,11 @@ export const startFollowUpCron = (): ReturnType<typeof cron.schedule> | undefine
     return undefined
   }
 
+  if (Object.values(config.followUp.workflows).some((id) => !id.trim())) {
+    console.error(`${LOG} Missing workflow IDs; cron not scheduled. Configure FOLLOWUP_*_WORKFLOW_ID or set FOLLOWUP_CRON=off. See docs/upgrading.md.`)
+    return undefined
+  }
+
   const { cron: expression, timezone } = config.followUp
   if (!cron.validate(expression)) {
     console.error(`${LOG} Invalid cron expression "${expression}" — job not scheduled`)

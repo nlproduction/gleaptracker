@@ -53,7 +53,7 @@ export async function jiraPost(req: Request, res: Response): Promise<void> {
   const statusChange = payload.changelog.items.find((item) => isRecord(item) && item.field === "status")
   const doneNames = cfg?.doneStatusNames?.length ? cfg.doneStatusNames : [cfg?.doneStatusName]
   if (!isRecord(statusChange) || typeof statusChange.toString !== "string" ||
-      !doneNames.includes(statusChange.toString) || statusChange.fromString === statusChange.toString) {
+      !doneNames.includes(statusChange["toString"] as unknown as string) || statusChange.fromString === statusChange.toString) {
     res.status(200).set(corsHeaders).send("No completed status transition")
     return
   }
