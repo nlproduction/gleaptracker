@@ -4,7 +4,11 @@
 
 We love [Gleap](https://gleap.cello.so/xZHEL1GRoMx): an AI-powered customer support platform with live chat and bug reporting in one place. It makes everyday support easier for the MapSVG team, helping us answer routine questions faster and spend more time building.
 
-Turn **Gleap tracker tickets** into **Slack conversations** and optional **Linear or Jira issues**. Keep related customer reports together, discuss the fix in one place, and notify the people waiting for it when the work is done.
+Gleap's built-in AI answers customer questions and hands conversations it cannot resolve to a human on the **Level 1 support team**. When that team needs help from developers, GleapTracker brings the issue into a dedicated **Slack thread**. Support and developers can discuss it together and call in a **Cursor agent** to investigate the code, fix a bug, and open a **GitHub pull request**.
+
+**We built GleapTracker for this Gleap → Slack → AI/GitHub workflow.** The Cursor agent is connected separately; GleapTracker keeps customer reports tied to the engineering discussion and the resolution. Multiple reports of the same bug share one tracker and Slack thread, with optional **Linear or Jira issues**.
+
+**Close a bug from Slack and notify every affected customer.** Write a resolution message in the Close dialog to send it to **all customers linked to that bug** and close the tracker. In our Gleap workflow, the linked customer tickets close too—one action instead of revisiting every conversation manually.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/nlproduction/gleaptracker/actions/workflows/ci.yml/badge.svg)](https://github.com/nlproduction/gleaptracker/actions/workflows/ci.yml)
@@ -19,40 +23,50 @@ A single bug can create dozens of support conversations. GleapTracker connects t
 
 - **One conversation per problem.** Linking a customer ticket to a Gleap tracker creates or updates its Slack thread. Additional reports appear as replies, not separate threads.
 - **Engineering tools that fit your team.** Create a Linear issue, a Jira issue, both, or neither. Issue links are saved in Gleap and shown in Slack.
-- **Close from where you work.** Use Slack's Close modal, a completed Linear/Jira issue, or a GitHub commit. Choose a customer message or close silently from Slack.
+- **Close in Slack, update everyone affected.** Send one resolution message to all customers linked to the bug and close the tracker; Gleap handles closing their tickets through your tracker/workflow configuration. You can also close silently or trigger completion from Linear/Jira or GitHub.
 - **Customer context stays connected.** Tracker descriptions travel into engineering issues, and `g:note` in a Slack thread adds an internal note to the Gleap tracker.
 - **Optional follow-ups.** Schedule no-reply workflows while excluding customers whose issue still has an active tracker.
 
 ## How it works
 
 ```text
-Customer reports in Gleap
+Customer asks a question in Gleap
           │
           ▼
-   Link to one tracker
+   Gleap AI answers
+          │ cannot resolve
+          ▼
+   Human Level 1 support
+          │ needs developer help
+          ▼
+   Link reports to one tracker
           │
-          ├── Slack thread: context, related reports, issue links, Close
+          ├── Slack thread: support + developers
+          │       └── Cursor agent → GitHub PR (optional, separate setup)
           ├── Linear issue (optional)
           └── Jira issue   (optional)
-                      │
-                      ▼
-            Work completed / Close
-                      │
-                      ▼
-     Notify linked customers → close tracker → update Slack
+          │
+          ▼
+   Fix ready → Close from Slack
+          │
+          ▼
+   Notify all linked customers
+          │
+          ▼
+   Close tracker + customer tickets in Gleap
 ```
 
-**Gleap remains the source of truth for customer grouping.** Linear and Jira are optional engineering integrations—not prerequisites for the Slack workflow.
+**Gleap remains the source of truth for customer grouping.** Linear and Jira are optional engineering integrations—not prerequisites for the Slack workflow. Cursor and other AI-agent connections are configured separately; see the [recommended AI-assisted workflow](#recommended-next-step-ai-assisted-support-with-grok-bot).
 
 | Close action | Customer notification |
 | --- | --- |
 | Mark the tracker Done directly in Gleap | Silent; updates Slack without sending customer messages |
-| Slack Close with text | Sends that text to linked customers |
+| Slack Close with text | Sends that text to all linked customers |
 | Slack Close with an empty message | Silent |
 | Completed Linear/Jira issue | Runs the configured Gleap workflow or sends the default message |
 | GitHub `Fixes Gleap-<trackerBugId>` on a configured branch | Runs the configured workflow or sends the default message |
 
-Only the tracker is explicitly marked Done by this service. Gleap handles the status of its linked customer tickets. Reopening a tracker restores its Slack Close button.
+Only the tracker is explicitly marked Done by this service. Gleap handles the linked customer tickets according to your tracker/workflow configuration; confirm that configuration to close every linked ticket as in the MapSVG workflow. Reopening a tracker restores its Slack Close button.
 
 ## Recommended next step: AI-assisted support with Grok-bot
 
