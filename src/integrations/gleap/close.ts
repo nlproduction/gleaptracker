@@ -36,12 +36,13 @@ const notifyLinkedCustomers = async (customerIds: string[], message?: string): P
 }
 
 const closeTrackerUnlocked = async (trackerHint: GleapTicket, opts: CloseTrackerOpts): Promise<void> => {
-  const tracker = (await loadTicket(trackerHint.id)) ?? trackerHint
+  const source = opts.source ?? "close"
+  const tracker = await loadTicket(trackerHint.id)
+  if (!tracker) throw new Error(`[${source}] Cannot verify tracker ${trackerHint.id} status before close`)
   const state = readTrackerForm(tracker.formData)
   const alreadyDone = isTrackerDone(tracker)
-  const source = opts.source ?? "close"
-  if (alreadyDone && state.closeProcessed) {
-    console.log(`[${source}] Tracker ${tracker.id} already closed — skipping notify`)
+  if (alreadyDone) {
+    console.log(`[${source}] Tracker ${tracker.id} already DONE — skipping close and customer notifications`)
     return
   }
 
@@ -56,10 +57,8 @@ const closeTrackerUnlocked = async (trackerHint: GleapTicket, opts: CloseTracker
     [TRACKER_FORM.closeSilent]: silent ? "true" : "false",
   })
   if (!saved) throw new Error(`[${source}] Failed to save close state for ${tracker.id}`)
-  if (!alreadyDone) {
-    if (!await getGleapClient().tickets.update(tracker.id, { status: config.gleap.doneStatus })) {
-      throw new Error(`[${source}] Failed to close tracker ${tracker.id}`)
-    }
+  if (!await getGleapClient().tickets.update(tracker.id, { status: config.gleap.doneStatus })) {
+    throw new Error(`[${source}] Failed to close tracker ${tracker.id}`)
   }
   const latest = (await loadTicket(tracker.id)) ?? tracker
   await markTrackerSlackClosed({

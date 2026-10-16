@@ -170,22 +170,38 @@ describe("closeTracker", () => {
     expect(mocks.markTrackerSlackClosed).toHaveBeenCalledTimes(1)
   })
 
-  it("is idempotent when the tracker is already DONE and close_processed", async () => {
-    const tracker = trackerTicket({
-      status: "DONE",
-      formData: { close_processed: "true", close_silent: "false" },
-    })
-    mocks.loadTicket.mockResolvedValue(tracker)
+  it.each([undefined, { close_processed: "true", close_silent: "false" }])(
+    "does not notify or write when the tracker is already DONE (formData: %j)",
+    async (formData) => {
+      const tracker = trackerTicket({
+        status: "DONE",
+        formData,
+      })
+      mocks.loadTicket.mockResolvedValue(tracker)
 
-    await closeTracker(tracker, {
-      message: "should not send again",
-      source: "gleap",
-    })
+      await closeTracker(tracker, {
+        message: "should not send again",
+        source: "github",
+      })
+
+      expect(mocks.loadCustomerTickets).not.toHaveBeenCalled()
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+      expect(mocks.runWorkflow).not.toHaveBeenCalled()
+      expect(mocks.update).not.toHaveBeenCalled()
+      expect(mocks.markTrackerSlackClosed).not.toHaveBeenCalled()
+    },
+  )
+
+  it("does not notify when a fresh tracker status cannot be fetched", async () => {
+    const tracker = trackerTicket()
+    mocks.loadTicket.mockResolvedValue(null)
+
+    await expect(closeTracker(tracker, { source: "github" })).rejects.toThrow(
+      "Cannot verify tracker tracker-1 status before close",
+    )
 
     expect(mocks.loadCustomerTickets).not.toHaveBeenCalled()
     expect(mocks.sendMessage).not.toHaveBeenCalled()
-    expect(mocks.runWorkflow).not.toHaveBeenCalled()
     expect(mocks.update).not.toHaveBeenCalled()
-    expect(mocks.markTrackerSlackClosed).not.toHaveBeenCalled()
   })
 })
